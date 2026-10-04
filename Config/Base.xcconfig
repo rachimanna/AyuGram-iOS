@@ -1,0 +1,12 @@
+// Shared build settings. Override any of these in Config/Secrets.xcconfig (git-ignored).
+
+// Change to your own reverse-DNS id before signing (must be unique for your Apple ID / team).
+AYU_BUNDLE_ID = com.ayugram.port.app
+AYU_DEVELOPMENT_TEAM =
+
+// Telegram API credentials from https://my.telegram.org → API development tools.
+// Leave empty to enter them inside the app on first launch.
+TG_API_ID =
+TG_API_HASH =
+
+#include? "Secrets.xcconfig"

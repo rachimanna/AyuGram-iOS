@@ -1,0 +1,81 @@
+name: iOS build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned IPA + run tests
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash  # -eo pipefail: xcodebuild failures are not hidden by xcbeautify
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select latest stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Optional secrets → Config/Secrets.xcconfig
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          # Without secrets the app simply asks for api_id/api_hash on first launch.
+          if [ -n "$TG_API_ID" ] && [ -n "$TG_API_HASH" ]; then
+            printf 'TG_API_ID = %s\nTG_API_HASH = %s\n' "$TG_API_ID" "$TG_API_HASH" > Config/Secrets.xcconfig
+          fi
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Cache SwiftPM (TDLibFramework is ~300 MB)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            build/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
+
+      - name: Resolve packages
+        run: xcodebuild -resolvePackageDependencies -project AyuGram.xcodeproj -scheme AyuGram -clonedSourcePackagesDirPath build/SourcePackages
+
+      - name: Unit tests (simulator)
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in d.items() if 'iOS' in k for x in v if 'iPhone' in x['name']))")
+          xcodebuild test -project AyuGram.xcodeproj -scheme AyuGram \
+            -destination "id=$UDID" \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            CODE_SIGNING_ALLOWED=NO | xcbeautify
+
+      - name: Build for device (unsigned)
+        run: |
+          xcodebuild build -project AyuGram.xcodeproj -scheme AyuGram \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | xcbeautify
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/DerivedData/Build/Products/Release-iphoneos/AyuGram.app Payload/
+          zip -qry AyuGram-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-unsigned-ipa
+          path: AyuGram-unsigned.ipa

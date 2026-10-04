@@ -1,0 +1,42 @@
+AyuGram for iOS
+===============
+
+This is a native iOS port of AyuGram for Android (AyuGram4A).
+It is distributed under the GNU General Public License, version 2 (see LICENSE).
+
+Original works and authors
+--------------------------
+
+* AyuGram4A — https://github.com/AyuGram/AyuGram4A
+  Copyright (C) 2023 Radolyn and AyuGram contributors.
+  "We do not and cannot prevent the use of our code, but be respectful and credit the original author."
+  The AyuGram-specific logic of this port (ghost mode, message saving, edits history,
+  message filters, AyuSync, preference keys and defaults, strings) is a translation of
+  the Java sources in TMessagesProj/src/main/java/com/radolyn/ayugram. Files derived from
+  a specific Android source name it in their header comment.
+
+* exteraGram — https://github.com/exteraSquad/exteraGram (GPL-2.0)
+* Telegraher — https://github.com/nikitasius/Telegraher (GPL-2.0)
+* Telegram for Android — https://github.com/DrKLO/Telegram
+  Copyright (C) Nikolai Kudashov and Telegram contributors. Licensed under GNU GPL v. 2 or later.
+
+The iOS port does not contain code from those projects' Java/C++ sources verbatim; it
+re-implements their behaviour in Swift on top of TDLib.
+
+Third-party components
+----------------------
+
+* TDLib — https://github.com/tdlib/td — Boost Software License 1.0
+* TDLibKit / TDLibFramework — https://github.com/Swiftgram/TDLibKit — MIT License
+* libopus — https://opus-codec.org — BSD 3-Clause License
+* libogg — https://xiph.org/ogg — BSD 3-Clause License
+* opus-swift / ogg-swift (XCFramework packaging of libopus/libogg) —
+  https://github.com/vector-im/opus-swift, https://github.com/vector-im/ogg-swift — MIT License
+
+Trademarks
+----------
+
+"Telegram" is a trademark of Telegram FZ-LLC. "AyuGram" belongs to its authors.
+This port is an unofficial project and is not affiliated with Telegram or with the AyuGram team.
+The app icon in this repository is an original placeholder; if you publish builds under the
+AyuGram name, respect the AyuGram authors' branding wishes.
