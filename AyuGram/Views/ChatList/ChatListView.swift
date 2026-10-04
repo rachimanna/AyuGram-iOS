@@ -203,6 +203,7 @@ struct ArchiveView: View {
 
 /// "Kill app" drawer button (AyuConstants.DRAWER_KILL_APP). iOS has no API for an app to terminate
 /// itself, so like Android's Process.killProcess this simply ends the process.
+@MainActor
 enum AppKiller {
     static func kill() {
         TelegramService.shared.setAppActive(false)
