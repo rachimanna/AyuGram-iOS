@@ -43,6 +43,7 @@ final class ChatViewModel: ChatEventSink {
     private(set) var errorText: String?
     var composerText: String = "" { didSet { onComposerChanged(oldValue) } }
     var mode: ComposerMode = .normal
+    private(set) var isSending = false
     var hiddenByFilterCount = 0
 
     @ObservationIgnored private let service = TelegramService.shared
@@ -89,7 +90,7 @@ final class ChatViewModel: ChatEventSink {
     func onDisappear() async {
         service.unsubscribe(chatId: chatId, self)
         viewFlushTask?.cancel()
-        flushViews()
+        pendingViews = []
         await service.saveDraft(chatId: chatId, text: composerText)
         await service.closeChat(chatId)
         didOpen = false
@@ -262,6 +263,8 @@ final class ChatViewModel: ChatEventSink {
     // MARK: - Viewing (read packets)
 
     func messageAppeared(_ m: MessageItem) {
+        service.setMessageDisplayed(chatId: chatId, messageId: m.id, displayed: true)
+        service.preserveViewed(m)
         guard !m.isOutgoing, !m.ayuDeleted, m.id > 0 else { return }
         pendingViews.insert(m.id)
         viewFlushTask?.cancel()
@@ -270,6 +273,10 @@ final class ChatViewModel: ChatEventSink {
             guard !Task.isCancelled else { return }
             self?.flushViews()
         }
+    }
+
+    func messageDisappeared(_ m: MessageItem) {
+        service.setMessageDisplayed(chatId: chatId, messageId: m.id, displayed: false)
     }
 
     private func flushViews() {
@@ -309,11 +316,13 @@ final class ChatViewModel: ChatEventSink {
     }
 
     func send() async {
+        guard !isSending else { return }
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        let originalText = composerText
         let current = mode
-        composerText = ""
-        mode = .normal
+        isSending = true
+        defer { isSending = false }
         do {
             switch current {
             case .edit(let m):
@@ -323,11 +332,14 @@ final class ChatViewModel: ChatEventSink {
             case .normal:
                 try await service.sendText(chatId: chatId, text: RichText(text: text), replyToMessageId: nil)
             }
-            notifyIfScheduled()
+            // Only clear the submitted draft, never a draft changed during the request.
+            if composerText == originalText && mode == current {
+                composerText = ""
+                mode = .normal
+            }
+            if case .edit = current {} else { notifyIfScheduled() }
         } catch {
             errorText = TelegramService.describe(error)
-            composerText = text
-            mode = current
         }
     }
 
@@ -337,12 +349,13 @@ final class ChatViewModel: ChatEventSink {
             return
         }
         let url = Self.outgoingDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        let current = mode
         do {
             try jpeg.write(to: url)
             let replyId: Int64? = { if case .reply(let m) = mode { return m.id }; return nil }()
-            mode = .normal
             try await service.sendPhoto(chatId: chatId, path: url.path, width: Int(image.size.width * image.scale),
                                         height: Int(image.size.height * image.scale), caption: "", replyToMessageId: replyId)
+            if mode == current { mode = .normal }
             notifyIfScheduled()
         } catch {
             errorText = TelegramService.describe(error)
@@ -354,12 +367,13 @@ final class ChatViewModel: ChatEventSink {
         defer { if access { source.stopAccessingSecurityScopedResource() } }
         let dir = Self.outgoingDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let target = dir.appendingPathComponent(source.lastPathComponent)
+        let current = mode
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try FileManager.default.copyItem(at: source, to: target)
             let replyId: Int64? = { if case .reply(let m) = mode { return m.id }; return nil }()
-            mode = .normal
             try await service.sendDocument(chatId: chatId, path: target.path, caption: "", replyToMessageId: replyId)
+            if mode == current { mode = .normal }
             notifyIfScheduled()
         } catch {
             errorText = TelegramService.describe(error)

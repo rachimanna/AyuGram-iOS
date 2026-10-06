@@ -5,6 +5,7 @@
 
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct EditsHistoryView: View {
     let message: MessageItem
@@ -14,6 +15,10 @@ struct EditsHistoryView: View {
     @Environment(AppearanceSettings.self) private var appearance
     @State private var revisions: [EditRevision] = []
     @State private var loaded = false
+    @State private var exporting = false
+    @State private var exportDocument = HistoryDocument()
+    @State private var exportType: UTType = .json
+    @State private var exportError = ""
 
     var body: some View {
         NavigationStack {
@@ -24,6 +29,10 @@ struct EditsHistoryView: View {
                 ForEach(revisions) { rev in
                     Section {
                         revisionContent(rev.message)
+                        if let index = revisions.firstIndex(where: { $0.id == rev.id }) {
+                            let next = index + 1 < revisions.count ? revisions[index + 1].message : (model.message(message.id) ?? message)
+                            DiffTextView(old: rev.message.body.plainText, new: next.body.plainText)
+                        }
                     } header: {
                         Text(LF("RevisionSavedAt", Formatters.fullDateTime(rev.entityCreateDate)))
                     }
@@ -38,12 +47,35 @@ struct EditsHistoryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button(L("Done")) { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Button("JSON") { export(json: true) }
+                        Button("TXT") { export(json: false) }
+                    } label: { Image(systemName: "square.and.arrow.up") }
+                }
             }
+            .fileExporter(isPresented: $exporting, document: exportDocument, contentType: exportType, defaultFilename: "AyuGram-edits") { result in
+                if case .failure(let failure) = result { exportError = failure.localizedDescription }
+                exportDocument = HistoryDocument()
+            }
+            .alert(L("ErrorOccurred"), isPresented: Binding(get: { !exportError.isEmpty }, set: { if !$0 { exportError = "" } })) {
+                Button("OK") { exportError = "" }
+            } message: { Text(exportError) }
             .task {
                 revisions = await model.revisions(of: message)
                 loaded = true
             }
         }
+    }
+
+    private func export(json: Bool) {
+        guard HistoryExporter.allowed(message) else { return }
+        do {
+            let current = model.message(message.id) ?? message
+            let versions = revisions + [EditRevision(id: 0, message: current, entityCreateDate: current.editDate > 0 ? current.editDate : current.date)]
+            exportDocument = HistoryDocument(data: try HistoryExporter.data(deleted: [], revisions: versions, json: json))
+            exportType = json ? .json : .plainText; exporting = true
+        } catch { exportError = error.localizedDescription }
     }
 
     @ViewBuilder
@@ -104,5 +136,27 @@ struct MessageDetailsView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L("Done")) { dismiss() } } }
         }
         .presentationDetents([.medium, .large])
+    }
+}
+
+struct DiffTextView: View {
+    let old: String
+    let new: String
+    private var text: Text {
+        TextDiff.runs(old: old, new: new).reduce(Text("")) { result, run in
+            switch run.kind {
+            case .same: return result + Text(run.text)
+            case .inserted: return result + Text(run.text).foregroundColor(.green).bold().underline()
+            case .removed: return result + Text(run.text).foregroundColor(.red).strikethrough()
+            }
+        }
+    }
+    var body: some View {
+        if old != new {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L("ChangesDiff")).font(.caption.bold()).foregroundStyle(.secondary)
+                text.font(.body).textSelection(.enabled)
+            }
+        }
     }
 }

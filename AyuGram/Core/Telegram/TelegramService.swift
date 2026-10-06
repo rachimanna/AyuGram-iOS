@@ -35,6 +35,11 @@ enum ConnectionStatus: Equatable {
     case waitingForNetwork, connectingToProxy, connecting, updating, ready
 }
 
+enum TelegramServiceError: LocalizedError {
+    case notReady
+    var errorDescription: String? { L("ServiceNotReady") }
+}
+
 struct SupergroupLite: Hashable {
     var isChannel: Bool
     var memberCount: Int
@@ -100,6 +105,13 @@ final class TelegramService {
     @ObservationIgnored private var rawNotificationSettings: [Int64: ChatNotificationSettings] = [:]
     @ObservationIgnored private var chatActionTimers: [Int64: Task<Void, Never>] = [:]
     @ObservationIgnored private var isAppActive = true
+    @ObservationIgnored private var activeChatId: Int64?
+    @ObservationIgnored private var displayedMessageIds: [Int64: Set<Int64>] = [:]
+    @ObservationIgnored private var pendingReadTasks: [Int64: Task<Void, Never>] = [:]
+    @ObservationIgnored private var pendingReadDates: [Int64: [Int64: Foundation.Date]] = [:]
+    @ObservationIgnored private var onlineTask: Task<Void, Never>?
+    @ObservationIgnored private var ephemeralKeys: Set<String> = []
+    @ObservationIgnored private var viewedEphemeral: [String: MessageItem] = [:]
     @ObservationIgnored private var credentials: ApiCredentials?
     @ObservationIgnored let config = AyuConfig.shared
     @ObservationIgnored let ayu = AyuMessagesController.shared
@@ -115,12 +127,21 @@ final class TelegramService {
             guard let f = try? await client.getFile(fileId: id), f.local.isDownloadingCompleted else { return nil }
             return f.local.path
         }
+        _ = NotificationCenter.default.addObserver(forName: .ayuPrivacyChanged, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cancelPendingReads(); self?.applyOnlineStatus() }
+        }
         _ = NotificationCenter.default.addObserver(forName: .ayuGhostModeChanged, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.applyOnlineStatus() }
+            MainActor.assumeIsolated { self?.cancelPendingReads(); self?.applyOnlineStatus() }
         }
         _ = NotificationCenter.default.addObserver(forName: .ayuMessageEdited, object: nil, queue: .main) { [weak self] note in
             guard let chatId = note.userInfo?["chatId"] as? Int64, let messageId = note.userInfo?["messageId"] as? Int64 else { return }
-            MainActor.assumeIsolated { self?.dispatch(chatId, .revisionsAdded(messageId: messageId)) }
+            MainActor.assumeIsolated {
+                self?.dispatch(chatId, .revisionsAdded(messageId: messageId))
+                self?.ayu.cachedIncoming(chatId: chatId, messageId: messageId) { incoming in
+                    if incoming { NotificationService.shared.onHistoryChange(chatId: chatId, edited: true) }
+                }
+                NotificationCenter.default.post(name: .ayuHistoryChanged, object: nil)
+            }
         }
     }
 
@@ -154,7 +175,12 @@ final class TelegramService {
             do {
                 let update = try client.decoder.decode(Update.self, from: data)
                 DispatchQueue.main.async {
-                    MainActor.assumeIsolated { self?.handle(update) }
+                    MainActor.assumeIsolated {
+                        self?.handle(update)
+                        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            LocalAutomation.shared.ingest(object)
+                        }
+                    }
                 }
             } catch {
                 AppLog.debug("Undecodable update: \(error)")
@@ -214,6 +240,7 @@ final class TelegramService {
     /// Scene became active / inactive.
     func setAppActive(_ active: Bool) {
         isAppActive = active
+        if !active { cancelPendingReads() }
         applyOnlineStatus()
     }
 
@@ -221,12 +248,15 @@ final class TelegramService {
 
     private func applyOnlineStatus() {
         guard let client, authStep == .ready else { return }
-        let online = isAppActive && config.sendOnlinePackets
-        Task {
+        onlineTask?.cancel()
+        let chatGhost = activeChatId.map { PrivacyPreferences.shared.isGhost($0) } ?? false
+        let online = isAppActive && AppLock.shared.canShowContent && config.sendOnlinePackets && !chatGhost
+        onlineTask = Task {
             _ = try? await client.setOption(name: "online", value: .optionValueBoolean(OptionValueBoolean(value: online)))
             if online && config.sendOfflinePacketAfterOnline {
                 // "Immediate offline after online"
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
                 _ = try? await client.setOption(name: "online", value: .optionValueBoolean(OptionValueBoolean(value: false)))
             }
         }
@@ -235,7 +265,8 @@ final class TelegramService {
     /// Called after the user sent something. The server may mark the account online on activity,
     /// so with "Immediate offline after online" we re-send the offline status.
     private func afterOwnActivity() {
-        guard let client, config.sendOfflinePacketAfterOnline, !(isAppActive && config.sendOnlinePackets) else { return }
+        let ghost = activeChatId.map { PrivacyPreferences.shared.isGhost($0) } ?? config.isGhostModeActive
+        guard let client, ghost || config.sendOfflinePacketAfterOnline else { return }
         Task {
             _ = try? await client.setOption(name: "online", value: .optionValueBoolean(OptionValueBoolean(value: false)))
         }
@@ -328,8 +359,12 @@ final class TelegramService {
     }
 
     private func setMyUserId(_ id: Int64) {
-        guard id != 0 else { return }
+        guard id != 0, id != myUserId else { return }
         myUserId = id
+        PrivacyPreferences.shared.selectAccount(id)
+        LocalReadStore.shared.selectAccount(id)
+        LocalAutomation.shared.selectAccount(id)
+        AppLock.shared.accountChanged()
         ayu.userId = id
         // Chats may have arrived before my_id was known.
         if var chat = chats[id], case .user = chat.kind {
@@ -339,6 +374,14 @@ final class TelegramService {
     }
 
     private func resetState() {
+        chatActionTimers.values.forEach { $0.cancel() }
+        chatActionTimers = [:]
+        sinks = [:]
+        scopeMuted = [:]
+        rawNotificationSettings = [:]
+        totalUnread = 0
+        AppRouter.shared.chatPath = []
+        AppRouter.shared.selectedTab = 0
         chats = [:]
         users = [:]
         basicGroupMembers = [:]
@@ -346,6 +389,11 @@ final class TelegramService {
         folders = []
         chatActions = [:]
         myUserId = 0
+        cancelPendingReads(); activeChatId = nil; displayedMessageIds = [:]; ephemeralKeys = []; viewedEphemeral = [:]
+        PrivacyPreferences.shared.selectAccount(0)
+        LocalReadStore.shared.selectAccount(0)
+        LocalAutomation.shared.selectAccount(0)
+        AppLock.shared.accountChanged()
         chatListLoadedAll = []
         chatListLoading = []
         files.reset()
@@ -472,11 +520,13 @@ final class TelegramService {
         case .updateNewMessage(let u):
             let item = convert(u.message)
             ayu.onMessagesSeen([item])
+            LocalAutomation.shared.sent(item)
             dispatch(item.chatId, .newMessage(item))
             NotificationService.shared.onNewMessage(item, chat: chats[item.chatId], appActive: isAppActive, title: chatTitle(item.chatId))
         case .updateMessageSendSucceeded(let u):
             let item = convert(u.message)
             ayu.onMessageSendSucceeded(oldId: u.oldMessageId, message: item)
+            LocalAutomation.shared.sent(item)
             dispatch(item.chatId, .sendSucceeded(oldId: u.oldMessageId, message: item))
         case .updateMessageSendFailed(let u):
             dispatch(u.message.chatId, .sendFailed(oldId: u.oldMessageId, message: convert(u.message)))
@@ -504,6 +554,9 @@ final class TelegramService {
             files.update(id: f.id, localPath: f.local.path, completed: f.local.isDownloadingCompleted,
                          downloaded: f.local.downloadedSize, size: f.size > 0 ? f.size : f.expectedSize,
                          isActive: f.local.isDownloadingActive)
+            if f.local.isDownloadingCompleted {
+                for message in viewedEphemeral.values where message.body.mainFile?.id == f.id { preserveViewed(message) }
+            }
 
         default:
             break
@@ -522,6 +575,8 @@ final class TelegramService {
         let ids = u.messageIds
         ayu.onMessagesDeleted(chatId: chatId, messageIds: ids, context: ayuContext(chatId)) { [weak self] saved in
             self?.dispatch(chatId, .deleted(messageIds: ids, saved: saved))
+            if saved.contains(where: { !$0.isOutgoing }) { NotificationService.shared.onHistoryChange(chatId: chatId, edited: false) }
+            NotificationCenter.default.post(name: .ayuHistoryChanged, object: nil)
         }
     }
 
@@ -655,7 +710,14 @@ final class TelegramService {
     }
 
     func convert(_ m: Message) -> MessageItem {
-        TDConvert.message(m, names: nameOf)
+        let item = TDConvert.message(m, names: nameOf)
+        LocalAutomation.shared.rememberCallMessage(item)
+        if let data = try? JSONEncoder().encode(m), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let content = object["content"] as? [String: Any] ?? [:]
+            let value = object["self_destruct_type"] ?? content["self_destruct_type"]
+            if let value, !(value is NSNull) { ephemeralKeys.insert("\(item.chatId):\(item.id)") }
+        }
+        return item
     }
 
     // MARK: - Chat list
@@ -704,10 +766,15 @@ final class TelegramService {
     }
 
     func openChat(_ chatId: Int64) async {
+        guard let chat = chats[chatId], AppLock.shared.visible(chat), AppLock.shared.canShowContent else { return }
+        activeChatId = chatId; applyOnlineStatus()
         _ = try? await client?.openChat(chatId: chatId)
     }
 
     func closeChat(_ chatId: Int64) async {
+        displayedMessageIds[chatId] = nil
+        pendingReadTasks.removeValue(forKey: chatId)?.cancel(); pendingReadDates[chatId] = nil
+        if activeChatId == chatId { activeChatId = nil; applyOnlineStatus() }
         _ = try? await client?.closeChat(chatId: chatId)
     }
 
@@ -730,14 +797,63 @@ final class TelegramService {
 
     /// Marks messages as viewed. With "Don't read messages" nothing is sent to the server;
     /// the chat is only marked read locally (AyuGhostUtils.markReadLocally).
+    func cancelPendingReads() {
+        pendingReadTasks.values.forEach { $0.cancel() }; pendingReadTasks = [:]; pendingReadDates = [:]
+    }
+
+    func mediaOpened(_ message: MessageItem) {
+        let ephemeral = message.selfDestructIn > 0 || ephemeralKeys.contains(message.historyKey)
+        if ephemeral { viewedEphemeral[message.historyKey] = message }
+        if let client {
+            Task { _ = try? await client.openMessageContent(chatId: message.chatId, messageId: message.id) }
+        }
+        preserveViewed(message)
+    }
+
+    func preserveViewed(_ message: MessageItem) {
+        guard PrivacyPreferences.shared.snapshot.keepViewedEphemeralMedia,
+              viewedEphemeral[message.historyKey] != nil, let file = message.body.mainFile else { return }
+        // Only a fully downloaded file is copied. Expired or inaccessible media is never recoverable.
+        guard let path = files.path(for: file), FileManager.default.fileExists(atPath: path) else { return }
+        ayu.preserveViewedMedia(message, localPath: path)
+    }
+
     func markViewed(chatId: Int64, messageIds: [Int64]) {
-        guard let maxId = messageIds.max() else { return }
-        if config.sendReadPackets {
-            guard let client else { return }
-            Task { _ = try? await client.viewMessages(chatId: chatId, forceRead: false, messageIds: messageIds, source: .messageSourceChatHistory) }
-            AyuSyncController.shared.syncRead(chatId: chatId, untilId: maxId, unread: 0)
-        } else {
-            LocalReadStore.shared.markRead(chatId: chatId, until: maxId)
+        guard isAppActive, AppLock.shared.canShowContent, let maxId = messageIds.max() else { return }
+        let privacy = PrivacyPreferences.shared
+        guard privacy.sendsRead(chatId) else {
+            LocalReadStore.shared.markRead(chatId: chatId, until: maxId); return
+        }
+        let delay = privacy.chat(chatId).readDelay
+        guard delay >= 0 else { return }
+        if delay == 0 { sendViewed(chatId: chatId, messageIds: messageIds); return }
+        let deadline = Date().addingTimeInterval(Double(min(delay, 3600)))
+        for id in messageIds where pendingReadDates[chatId]?[id] == nil { pendingReadDates[chatId, default: [:]][id] = deadline }
+        guard pendingReadTasks[chatId] == nil else { return }
+        let account = myUserId
+        pendingReadTasks[chatId] = Task { [weak self] in
+            while let self, !Task.isCancelled, let next = self.pendingReadDates[chatId]?.values.min() {
+                let wait = max(0, next.timeIntervalSinceNow)
+                do { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) } catch { return }
+                guard !Task.isCancelled, self.myUserId == account, self.activeChatId == chatId,
+                      self.isAppActive, AppLock.shared.canShowContent, privacy.sendsRead(chatId), privacy.chat(chatId).readDelay == delay else { return }
+                let ids = self.pendingReadDates[chatId]?.filter { $0.value <= Date() }.map(\.key) ?? []
+                for id in ids { self.pendingReadDates[chatId]?[id] = nil }
+                self.sendViewed(chatId: chatId, messageIds: ids)
+                if self.pendingReadDates[chatId]?.isEmpty != false {
+                    self.pendingReadDates[chatId] = nil; self.pendingReadTasks[chatId] = nil; return
+                }
+            }
+        }
+    }
+
+    private func sendViewed(chatId: Int64, messageIds: [Int64]) {
+        guard let client, let maxId = messageIds.max() else { return }
+        Task {
+            do {
+                try await client.viewMessages(chatId: chatId, forceRead: false, messageIds: messageIds, source: .messageSourceChatHistory)
+                AyuSyncController.shared.syncRead(chatId: chatId, untilId: maxId, unread: 0)
+            } catch { AppLog.debug("Read status: \(error)") }
         }
     }
 
@@ -745,7 +861,9 @@ final class TelegramService {
     /// (AyuGhostUtils.markReadOnServer).
     func markReadOnServer(chatId: Int64, untilMessageId: Int64) async {
         guard let client else { return }
-        _ = try? await client.viewMessages(chatId: chatId, forceRead: true, messageIds: [untilMessageId], source: .messageSourceChatHistory)
+        pendingReadTasks.removeValue(forKey: chatId)?.cancel(); pendingReadDates[chatId] = nil
+        do { try await client.viewMessages(chatId: chatId, forceRead: true, messageIds: [untilMessageId], source: .messageSourceChatHistory) }
+        catch { AppLog.debug("Manual read: \(error)"); return }
         LocalReadStore.shared.markRead(chatId: chatId, until: untilMessageId)
         AyuSyncController.shared.syncRead(chatId: chatId, untilId: untilMessageId, unread: 0)
     }
@@ -753,7 +871,7 @@ final class TelegramService {
     // MARK: - AyuGram hook: typing (ConnectionsManager: TL_messages_setTyping)
 
     func sendTyping(chatId: Int64) {
-        guard config.sendUploadProgress, let client else { return }
+        guard PrivacyPreferences.shared.sendsTyping(chatId), AppLock.shared.canShowContent, let client else { return }
         Task { _ = try? await client.sendChatAction(action: .chatActionTyping, businessConnectionId: nil, chatId: chatId, topicId: nil) }
     }
 
@@ -780,7 +898,7 @@ final class TelegramService {
 
     @discardableResult
     func send(chatId: Int64, content: InputMessageContent, replyToMessageId: Int64?) async throws -> MessageItem? {
-        guard let client else { return nil }
+        guard let client, authStep == .ready else { throw TelegramServiceError.notReady }
         // Remember the newest incoming message before our own message becomes the chat's last one.
         let lastIncoming = chats[chatId]?.lastMessage.flatMap { $0.isOutgoing ? nil : $0.id }
         let sent = try await client.sendMessage(chatId: chatId, inputMessageContent: content, options: sendOptions(),
@@ -812,21 +930,25 @@ final class TelegramService {
     /// "Send read status after reply" + "Immediate offline".
     private func afterSend(chatId: Int64, lastIncoming: Int64?) {
         afterOwnActivity()
-        guard !config.sendReadPackets, config.markReadAfterSend, let lastIncoming else { return }
+        guard !PrivacyPreferences.shared.sendsRead(chatId), config.markReadAfterSend, PrivacyPreferences.shared.chat(chatId).readDelay == 0, let lastIncoming else { return }
         Task { await markReadOnServer(chatId: chatId, untilMessageId: lastIncoming) }
     }
 
     func editText(chatId: Int64, messageId: Int64, text: RichText) async throws {
-        guard let client else { return }
+        guard let client, authStep == .ready else { throw TelegramServiceError.notReady }
         let content = InputMessageContent.inputMessageText(InputMessageText(clearDraft: false, linkPreviewOptions: nil, text: text.formattedText))
         _ = try await client.editMessageText(chatId: chatId, inputMessageContent: content, messageId: messageId, replyMarkup: nil)
     }
 
     func delete(chatId: Int64, messageIds: [Int64], revoke: Bool) async throws {
-        guard let client else { return }
+        guard let client, authStep == .ready else { throw TelegramServiceError.notReady }
         // --- AyuGram hook: own deletions are not saved as "deleted" (AyuState.permitDeleteMessage)
         AyuState.shared.permitDeleteMessages(chatId: chatId, messageIds: messageIds)
-        try await client.deleteMessages(chatId: chatId, messageIds: messageIds, revoke: revoke)
+        do { try await client.deleteMessages(chatId: chatId, messageIds: messageIds, revoke: revoke) }
+        catch {
+            messageIds.forEach { AyuState.shared.messageDeleted(chatId: chatId, messageId: $0) }
+            throw error
+        }
     }
 
     func forward(messageIds: [Int64], from fromChatId: Int64, to chatId: Int64) async throws {
@@ -879,7 +1001,7 @@ final class TelegramService {
         if !unread {
             // Ghost-aware "mark as read"
             if let last = chats[chatId]?.lastMessage?.id {
-                if config.sendReadPackets {
+                if PrivacyPreferences.shared.sendsRead(chatId) && PrivacyPreferences.shared.chat(chatId).readDelay == 0 {
                     await markReadOnServer(chatId: chatId, untilMessageId: last)
                 } else {
                     LocalReadStore.shared.markRead(chatId: chatId, until: last)
@@ -1035,6 +1157,21 @@ final class TelegramService {
     }
 
     // MARK: - Sponsored messages (AyuConfig.disableAds)
+
+    func reportSecretScreenshot(chatId: Int64) async {
+        guard case .secret = chats[chatId]?.kind, activeChatId == chatId,
+              AppLock.shared.canShowContent, let client,
+              let ids = displayedMessageIds[chatId], !ids.isEmpty else { return }
+        // TDLib 1.8.67 reports captures through the screenshot view source.
+        do { try await client.viewMessages(chatId: chatId, forceRead: false, messageIds: Array(ids), source: .messageSourceScreenshot) }
+        catch { AppLog.debug("Secret screenshot notification: \(error)") }
+    }
+
+    func setMessageDisplayed(chatId: Int64, messageId: Int64, displayed: Bool) {
+        guard messageId > 0 else { return }
+        if displayed { displayedMessageIds[chatId, default: []].insert(messageId) }
+        else { displayedMessageIds[chatId]?.remove(messageId) }
+    }
 
     func sponsoredMessage(chatId: Int64) async -> (title: String, text: String, url: String)? {
         guard !config.disableAds, let client, let list = try? await client.getChatSponsoredMessages(chatId: chatId),

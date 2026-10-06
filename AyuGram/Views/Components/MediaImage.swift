@@ -72,6 +72,8 @@ struct MediaImage: View {
 }
 
 struct AvatarView: View {
+    @Environment(AppearanceSettings.self) private var appearance
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: appearance.roundedAvatars ? size / 2 : size * 0.18) }
     let id: Int64
     let title: String
     let photo: PhotoRef?
@@ -82,14 +84,14 @@ struct AvatarView: View {
     var body: some View {
         ZStack {
             if isSavedMessages {
-                Circle().fill(Theme.avatarGradient(for: 5, colorId: 5))
+                shape.fill(Theme.avatarGradient(for: 5, colorId: 5))
                 Image(systemName: "bookmark.fill").font(.system(size: size * 0.42)).foregroundStyle(.white)
             } else if let photo {
                 MediaImage(file: photo.small, thumb: ThumbRef(minithumbnail: photo.minithumbnail, file: nil, width: 0, height: 0),
                            maxPixel: size * 3)
-                    .clipShape(Circle())
+                    .clipShape(shape)
             } else {
-                Circle().fill(Theme.avatarGradient(for: id, colorId: colorId))
+                shape.fill(Theme.avatarGradient(for: id, colorId: colorId))
                 Text(Self.initials(title))
                     .font(.system(size: size * 0.38, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)

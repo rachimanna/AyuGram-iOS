@@ -57,6 +57,9 @@ struct AyuPreferencesView: View {
                         Text(L("LocalPremiumHint")).font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                NavigationLink { LocalPremiumView() } label: {
+                    Label(L("PremiumCustomize"), systemImage: "paintpalette.fill")
+                }
                 NavigationLink {
                     RegexFiltersView()
                 } label: {

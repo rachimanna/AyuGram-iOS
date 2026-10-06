@@ -262,7 +262,7 @@ struct MessageItem: Codable, Identifiable, Hashable {
 }
 
 /// A stored edit revision (EditedMessage entity).
-struct EditRevision: Identifiable, Hashable {
+struct EditRevision: Codable, Identifiable, Hashable {
     var id: Int64           // fakeId
     var message: MessageItem
     var entityCreateDate: Int

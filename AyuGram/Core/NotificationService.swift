@@ -34,18 +34,33 @@ final class NotificationService {
            AyuFilter.shared.isFiltered(text: message.body.plainText, dialogId: message.chatId, messageId: message.id) {
             return
         }
+        guard !AppLock.shared.decoy else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         let preview = MessagePreview.text(for: message.body)
         if chat.kind.isGroup {
             content.subtitle = TelegramService.shared.nameOf(message.sender)
         }
-        content.body = preview
+        if AppLock.shared.enabled || PrivacyPreferences.shared.isProtected(chat.id, positions: chat.positions) {
+            content.title = "AyuGram"; content.subtitle = ""; content.body = L("PrivateNotification")
+        } else { content.body = preview }
         content.sound = .default
         content.threadIdentifier = "\(message.chatId)"
         content.userInfo = ["chatId": message.chatId]
         let request = UNNotificationRequest(identifier: "\(message.chatId)_\(message.id)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    func onHistoryChange(chatId: Int64, edited: Bool) {
+        guard authorized, !AppLock.shared.decoy,
+              edited ? PrivacyPreferences.shared.snapshot.notifyEdits : PrivacyPreferences.shared.snapshot.notifyDeletions,
+              let chat = TelegramService.shared.chats[chatId], !chat.isMuted else { return }
+        let content = UNMutableNotificationContent()
+        let privateContent = AppLock.shared.enabled || PrivacyPreferences.shared.isProtected(chatId, positions: chat.positions)
+        content.title = privateContent ? "AyuGram" : chat.title
+        content.body = privateContent ? L("PrivateNotification") : L(edited ? "MessageEditedNotice" : "MessageDeletedNotice")
+        content.sound = .default; content.userInfo = ["chatId": chatId, "historyChange": true]
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "history-\(chatId)-\(edited)-\(UUID().uuidString)", content: content, trigger: nil))
     }
 
     // MARK: - Background refresh
