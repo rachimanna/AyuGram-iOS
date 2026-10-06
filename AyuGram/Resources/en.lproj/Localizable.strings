@@ -28,6 +28,7 @@
 "AttachPhotoExpired" = "Photo has expired";
 "AttachRound" = "Video message";
 "AttachSticker" = "Sticker";
+"StickersUnavailable" = "No installed stickers";
 "AttachStory" = "Story";
 "AttachVideo" = "Video";
 "AttachVideoExpired" = "Video has expired";
@@ -286,3 +287,16 @@
 "You" = "You";
 "YourName" = "Your name";
 "YourPhone" = "Your phone";
+"Stories" = "Stories";
+"StoriesMore" = "More stories";
+"StoryPrevious" = "Previous";
+"StoryNext" = "Next";
+"StoryUnsupported" = "This story format is not supported yet.";
+"Retry" = "Retry";
+"VoiceRecord" = "Record voice message";
+"VoiceStop" = "Stop recording";
+"VoiceListen" = "Listen";
+"VoiceRecordAgain" = "Record again";
+"VoiceSend" = "Send voice message";
+"VoiceMicrophoneDenied" = "Allow microphone access in iOS Settings to record voice messages.";
+"VoiceSendFailed" = "Sending failed. Your recording is kept; you can retry.";

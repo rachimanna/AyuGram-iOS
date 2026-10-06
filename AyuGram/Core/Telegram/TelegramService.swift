@@ -87,6 +87,10 @@ final class TelegramService {
     /// chatId → "Alice is typing…"
     var chatActions: [Int64: String] = [:]
     var totalUnread: Int = 0
+    var storyGroups: [Int64: ChatStoryGroup] = [:]
+    var storiesLoading = false
+    var storiesLoadedAll = false
+    var storiesError: String?
 
     let files = FileStore()
 
@@ -344,6 +348,10 @@ final class TelegramService {
         basicGroupMembers = [:]
         supergroups = [:]
         folders = []
+        storyGroups = [:]
+        storiesLoading = false
+        storiesLoadedAll = false
+        storiesError = nil
         chatActions = [:]
         myUserId = 0
         chatListLoadedAll = []
@@ -375,6 +383,15 @@ final class TelegramService {
 
     private func handle(_ update: Update) {
         switch update {
+        case .updateChatActiveStories(let u):
+            applyActiveStories(u.activeStories)
+
+        case .updateStoryDeleted(let u):
+            storyGroups[u.storyPosterChatId]?.references.removeAll { $0.storyId == u.storyId }
+            if storyGroups[u.storyPosterChatId]?.references.isEmpty == true {
+                storyGroups[u.storyPosterChatId] = nil
+            }
+
         case .updateAuthorizationState(let u):
             handleAuthorization(u.authorizationState)
 
@@ -809,6 +826,28 @@ final class TelegramService {
         try await send(chatId: chatId, content: content, replyToMessageId: replyToMessageId)
     }
 
+    func sendVoiceNote(chatId: Int64, path: String, duration: Int, replyToMessageId: Int64?) async throws {
+        guard client != nil else { throw URLError(.notConnectedToInternet) }
+        let voice = InputVoiceNote(duration: duration, voiceNote: .inputFileLocal(InputFileLocal(path: path)), waveform: Data())
+        let content = InputMessageContent.inputMessageVoiceNote(InputMessageVoiceNote(caption: nil, selfDestructType: nil, voiceNote: voice))
+        try await send(chatId: chatId, content: content, replyToMessageId: replyToMessageId)
+    }
+
+    func installedStickers(query: String = "") async throws -> [StickerItem] {
+        guard let client else { throw URLError(.notConnectedToInternet) }
+        let result = try await client.getStickers(chatId: 0, limit: 200, query: query, stickerType: .stickerTypeRegular)
+        return result.stickers.map(TDConvert.sticker)
+    }
+
+    func sendSticker(chatId: Int64, sticker: StickerItem, replyToMessageId: Int64?) async throws {
+        guard client != nil else { throw URLError(.notConnectedToInternet) }
+        let file = InputSticker(height: sticker.height, sticker: .inputFileId(InputFileId(id: sticker.file.id)),
+                                thumbnail: nil, width: sticker.width)
+        let input = InputMessageSticker(emoji: sticker.emoji, sticker: file)
+        let content = InputMessageContent.inputMessageSticker(input)
+        try await send(chatId: chatId, content: content, replyToMessageId: replyToMessageId)
+    }
+
     /// "Send read status after reply" + "Immediate offline".
     private func afterSend(chatId: Int64, lastIncoming: Int64?) {
         afterOwnActivity()
@@ -1002,6 +1041,70 @@ final class TelegramService {
     }
 
     // MARK: - Files
+
+    // MARK: - Stories
+
+    var orderedStoryGroups: [ChatStoryGroup] {
+        storyGroups.values.sorted {
+            $0.order == $1.order ? $0.id > $1.id : $0.order > $1.order
+        }
+    }
+
+    private func applyActiveStories(_ active: ChatActiveStories) {
+        guard active.list == .storyListMain, active.order != 0, !active.stories.isEmpty else {
+            storyGroups[active.chatId] = nil
+            return
+        }
+        storyGroups[active.chatId] = ChatStoryGroup(
+            id: active.chatId, order: active.order,
+            references: active.stories.map { StoryReference(chatId: active.chatId, storyId: $0.storyId) },
+            maxReadStoryId: active.maxReadStoryId)
+    }
+
+    func loadMoreStories() async {
+        guard let client, !storiesLoading, !storiesLoadedAll else { return }
+        storiesLoading = true
+        storiesError = nil
+        defer { storiesLoading = false }
+        do {
+            _ = try await client.loadActiveStories(storyList: .storyListMain)
+        } catch {
+            if let error = error as? TDLibKit.Error, error.code == 404 {
+                storiesLoadedAll = true
+            } else { storiesError = Self.describe(error) }
+        }
+    }
+
+    func story(_ reference: StoryReference) async throws -> StoryItem {
+        guard let client else { throw URLError(.notConnectedToInternet) }
+        let story = try await client.getStory(onlyLocal: false, storyId: reference.storyId,
+                                               storyPosterChatId: reference.chatId)
+        let content: StoryItem.Content
+        switch story.content {
+        case .storyContentPhoto(let photo):
+            content = TDConvert.largestPhoto(photo.photo).map { .photo($0) } ?? .unsupported
+        case .storyContentVideo(let video):
+            let v = video.alternativeVideo ?? video.video
+            content = .video(VideoItem(thumb: ThumbRef(mini: v.minithumbnail, thumb: v.thumbnail),
+                                       file: FileRef(v.video), width: v.width, height: v.height,
+                                       duration: Int(v.duration.rounded(.up)), fileName: "story.mp4"))
+        default: content = .unsupported
+        }
+        return StoryItem(reference: reference, caption: RichText(story.caption), content: content)
+    }
+
+    /// Opening a story sends a view receipt; respect AyuGram's read-packet setting.
+    func openStory(_ reference: StoryReference) async -> Bool {
+        guard config.sendReadPackets, let client else { return false }
+        do {
+            _ = try await client.openStory(storyId: reference.storyId, storyPosterChatId: reference.chatId)
+            return true
+        } catch { return false }
+    }
+
+    func closeStory(_ reference: StoryReference) async {
+        _ = try? await client?.closeStory(storyId: reference.storyId, storyPosterChatId: reference.chatId)
+    }
 
     private func startDownload(fileId: Int, priority: Int) {
         guard let client else { return }

@@ -30,6 +30,8 @@ Third-party components
 * TDLibKit / TDLibFramework — https://github.com/Swiftgram/TDLibKit — MIT License
 * libopus — https://opus-codec.org — BSD 3-Clause License
 * libogg — https://xiph.org/ogg — BSD 3-Clause License
+* Lottie iOS — https://github.com/airbnb/lottie-ios — Apache License 2.0
+* zlib — https://zlib.net — zlib License (system library)
 * opus-swift / ogg-swift (XCFramework packaging of libopus/libogg) —
   https://github.com/vector-im/opus-swift, https://github.com/vector-im/ogg-swift — MIT License
 

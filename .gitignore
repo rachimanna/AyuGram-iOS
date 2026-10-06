@@ -8,6 +8,8 @@ build/
 *.dSYM.zip
 .swiftpm/
 .build/
+__pycache__/
+*.pyc
 # Secrets
 Config/Secrets.xcconfig
 # macOS

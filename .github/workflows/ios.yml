@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, "claude/**"]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:
@@ -12,6 +13,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     name: Build unsigned IPA + run tests
     runs-on: macos-15
     timeout-minutes: 60
@@ -75,7 +77,12 @@ jobs:
           cp -R build/DerivedData/Build/Products/Release-iphoneos/AyuGram.app Payload/
           zip -qry AyuGram-unsigned.ipa Payload
 
+      - name: Report IPA and installed application size
+        run: python3 scripts/ipa_report.py AyuGram-unsigned.ipa --output build/ipa-size.json
+
       - uses: actions/upload-artifact@v4
         with:
           name: AyuGram-unsigned-ipa
-          path: AyuGram-unsigned.ipa
+          path: |
+            AyuGram-unsigned.ipa
+            build/ipa-size.json
