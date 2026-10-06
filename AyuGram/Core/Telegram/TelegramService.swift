@@ -107,7 +107,7 @@ final class TelegramService {
     @ObservationIgnored private var isAppActive = true
     @ObservationIgnored private var activeChatId: Int64?
     @ObservationIgnored private var pendingReadTasks: [Int64: Task<Void, Never>] = [:]
-    @ObservationIgnored private var pendingReadDates: [Int64: [Int64: Date]] = [:]
+    @ObservationIgnored private var pendingReadDates: [Int64: [Int64: Foundation.Date]] = [:]
     @ObservationIgnored private var onlineTask: Task<Void, Never>?
     @ObservationIgnored private var ephemeralKeys: Set<String> = []
     @ObservationIgnored private var viewedEphemeral: [String: MessageItem] = [:]
