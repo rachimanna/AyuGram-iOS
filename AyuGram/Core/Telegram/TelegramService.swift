@@ -35,6 +35,11 @@ enum ConnectionStatus: Equatable {
     case waitingForNetwork, connectingToProxy, connecting, updating, ready
 }
 
+enum TelegramServiceError: LocalizedError {
+    case notReady
+    var errorDescription: String? { L("ServiceNotReady") }
+}
+
 struct SupergroupLite: Hashable {
     var isChannel: Bool
     var memberCount: Int
@@ -339,6 +344,14 @@ final class TelegramService {
     }
 
     private func resetState() {
+        chatActionTimers.values.forEach { $0.cancel() }
+        chatActionTimers = [:]
+        sinks = [:]
+        scopeMuted = [:]
+        rawNotificationSettings = [:]
+        totalUnread = 0
+        AppRouter.shared.chatPath = []
+        AppRouter.shared.selectedTab = 0
         chats = [:]
         users = [:]
         basicGroupMembers = [:]
@@ -780,7 +793,7 @@ final class TelegramService {
 
     @discardableResult
     func send(chatId: Int64, content: InputMessageContent, replyToMessageId: Int64?) async throws -> MessageItem? {
-        guard let client else { return nil }
+        guard let client, authStep == .ready else { throw TelegramServiceError.notReady }
         // Remember the newest incoming message before our own message becomes the chat's last one.
         let lastIncoming = chats[chatId]?.lastMessage.flatMap { $0.isOutgoing ? nil : $0.id }
         let sent = try await client.sendMessage(chatId: chatId, inputMessageContent: content, options: sendOptions(),
@@ -817,7 +830,7 @@ final class TelegramService {
     }
 
     func editText(chatId: Int64, messageId: Int64, text: RichText) async throws {
-        guard let client else { return }
+        guard let client, authStep == .ready else { throw TelegramServiceError.notReady }
         let content = InputMessageContent.inputMessageText(InputMessageText(clearDraft: false, linkPreviewOptions: nil, text: text.formattedText))
         _ = try await client.editMessageText(chatId: chatId, inputMessageContent: content, messageId: messageId, replyMarkup: nil)
     }

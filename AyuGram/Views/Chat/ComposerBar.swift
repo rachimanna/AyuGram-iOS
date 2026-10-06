@@ -32,6 +32,7 @@ struct ComposerBar: View {
             }
             if model.canWrite {
                 inputRow
+                    .disabled(model.isSending)
             } else {
                 readOnlyRow
             }
@@ -76,7 +77,9 @@ struct ComposerBar: View {
                 Task { await model.send() }
             } label: {
                 ZStack(alignment: .bottomTrailing) {
+                    if model.isSending { ProgressView() }
                     Image(systemName: isEditing ? "checkmark.circle.fill" : "arrow.up.circle.fill")
+                        .opacity(model.isSending ? 0 : 1)
                         .font(.system(size: 32))
                         .foregroundStyle(canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                     // AyuGram "Schedule messages": every message is sent as a 12-second scheduled message.
