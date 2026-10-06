@@ -19,7 +19,7 @@ struct SettingsView: View {
                                 Text(me?.fullName ?? "").font(.title3.bold())
                                 // AyuGram "Local Telegram Premium" (client-side only, like on Android).
                                 if me?.isPremium == true || ayu.localPremium {
-                                    Image(systemName: "star.fill").foregroundStyle(.purple)
+                                    PremiumBadge()
                                 }
                             }
                             if let phone = me?.phoneNumber, !phone.isEmpty { Text("+" + phone).foregroundStyle(.secondary) }
@@ -27,6 +27,22 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 6)
+                }
+
+                Section {
+                    NavigationLink { LocalPremiumView() } label: { PremiumSettingsCard() }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+
+                Section(L("QuickActions")) {
+                    Toggle(isOn: Binding(get: { ayu.isGhostModeActive }, set: { ayu.setGhostMode($0) })) {
+                        Label { Text(L("GhostModeToggle")) } icon: {
+                            GhostGlyph(active: ayu.isGhostModeActive).frame(width: 24, height: 24)
+                        }
+                    }
                 }
 
                 Section {
@@ -85,15 +101,21 @@ struct AppearanceView: View {
                 .pickerStyle(.segmented)
             }
             Section(L("AccentColor")) {
-                HStack(spacing: 14) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 14) {
                     ForEach(Theme.accents.indices, id: \.self) { i in
-                        Circle()
-                            .fill(Theme.accents[i])
-                            .frame(width: 34, height: 34)
-                            .overlay {
-                                if appearance.accentIndex == i { Image(systemName: "checkmark").foregroundStyle(.white).bold() }
+                        Button { appearance.accentIndex = i } label: {
+                            Circle()
+                                .fill(Theme.accents[i])
+                                .frame(width: 34, height: 34)
+                                .overlay {
+                                    if AppearanceSettings.validAccentIndex(appearance.accentIndex) == i {
+                                        Image(systemName: "checkmark").foregroundStyle(.white).bold()
+                                    }
+                                }
+                                .frame(minWidth: 44, minHeight: 44)
                             }
-                            .onTapGesture { appearance.accentIndex = i }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(L("AccentColor") + " \(i + 1)")
                     }
                 }
                 .padding(.vertical, 6)
@@ -101,6 +123,11 @@ struct AppearanceView: View {
             Section(L("TextSize")) {
                 Slider(value: $appearance.messageTextSize, in: 12...24, step: 1)
                 Text(L("TextSizePreview")).font(.system(size: appearance.messageTextSize))
+            }
+            Section {
+                NavigationLink { LocalPremiumView() } label: {
+                    Label("Ayu Premium", systemImage: "star.fill")
+                }
             }
         }
         .navigationTitle(L("Appearance"))

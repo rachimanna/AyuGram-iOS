@@ -36,7 +36,7 @@ struct ChatView: View {
             }
             ComposerBar(model: model)
         }
-        .background(Theme.chatBackground.ignoresSafeArea())
+        .background { ChatBackdrop().ignoresSafeArea() }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {

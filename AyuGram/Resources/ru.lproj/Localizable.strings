@@ -286,3 +286,29 @@
 "You" = "Вы";
 "YourName" = "Ваше имя";
 "YourPhone" = "Ваш телефон";
+
+/* Local Premium and reliability */
+"ServiceNotReady" = "Нет подключения к Telegram. Черновик сохранён — попробуйте снова после входа.";
+"QuickActions" = "Быстрые действия";
+"PremiumEnable" = "Включить Local Premium";
+"PremiumDeviceOnly" = "Бесплатно. Настройка сохраняется на этом устройстве; её можно отключить в любой момент.";
+"PremiumYourStyle" = "Твой стиль";
+"PremiumPalette_aurora" = "Сияние";
+"PremiumPalette_ocean" = "Океан";
+"PremiumPalette_sunset" = "Закат";
+"PremiumChatStyle" = "Градиентные сообщения и фон чата";
+"PremiumStyleHint" = "Палитру можно выбрать заранее. Она применяется в чатах, когда включены Local Premium и оформление чатов.";
+"PremiumBadgeFeature" = "Значок Premium";
+"PremiumBadgeDetail" = "Звёздочка рядом с твоим именем в профиле и настройках — видна только в этом приложении.";
+"PremiumStyleFeature" = "Особое оформление чатов";
+"PremiumStyleDetail" = "Три палитры для исходящих сообщений, альбомов и мягкого фона чата.";
+"PremiumPrivateFeature" = "На твоём устройстве";
+"PremiumPrivateDetail" = "Без оплаты и серверной подписки. При отключении возвращается обычное оформление чатов.";
+"PremiumServerNote" = "Local Premium меняет только оформление. Лимиты Telegram Premium, отправка премиум-эмодзи, истории и другие серверные функции требуют настоящей подписки.";
+"PremiumHeroSubtitle" = "Больше твоего стиля. Бесплатно, на этом устройстве.";
+"PremiumActive" = "Local Premium включён";
+"PremiumFree" = "Бесплатно · на этом устройстве";
+"PremiumPreview" = "Предпросмотр";
+"PremiumPreviewIncoming" = "Как тебе новое оформление?";
+"PremiumPreviewOutgoing" = "Теперь всё по моему вкусу ✨";
+"PremiumCustomize" = "Оформить Local Premium";

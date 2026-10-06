@@ -286,3 +286,29 @@
 "You" = "You";
 "YourName" = "Your name";
 "YourPhone" = "Your phone";
+
+/* Local Premium and reliability */
+"ServiceNotReady" = "Telegram is not connected. Your draft is saved; try again after signing in.";
+"QuickActions" = "Quick actions";
+"PremiumEnable" = "Enable Local Premium";
+"PremiumDeviceOnly" = "Free. Your choice is saved on this device and can be turned off at any time.";
+"PremiumYourStyle" = "Your style";
+"PremiumPalette_aurora" = "Aurora";
+"PremiumPalette_ocean" = "Ocean";
+"PremiumPalette_sunset" = "Sunset";
+"PremiumChatStyle" = "Gradient bubbles and chat background";
+"PremiumStyleHint" = "Choose a palette in advance. It appears in chats when Local Premium and chat styling are enabled.";
+"PremiumBadgeFeature" = "Premium badge";
+"PremiumBadgeDetail" = "A star beside your name in your profile and settings, visible only in this app.";
+"PremiumStyleFeature" = "Signature chat style";
+"PremiumStyleDetail" = "Three palettes for outgoing messages, media albums and a soft chat background.";
+"PremiumPrivateFeature" = "On your device";
+"PremiumPrivateDetail" = "No payment or server subscription. Disabling restores the standard chat style.";
+"PremiumServerNote" = "Local Premium changes appearance only. Telegram Premium limits, emoji sending, stories and other server features still require a real subscription.";
+"PremiumHeroSubtitle" = "A little more you. Free, on this device.";
+"PremiumActive" = "Local Premium enabled";
+"PremiumFree" = "Free · on this device";
+"PremiumPreview" = "Live preview";
+"PremiumPreviewIncoming" = "How about a new look?";
+"PremiumPreviewOutgoing" = "This feels like me ✨";
+"PremiumCustomize" = "Customize Local Premium";

@@ -5,6 +5,7 @@ import UIKit
 @Observable
 final class AppearanceSettings {
     static let shared = AppearanceSettings()
+    @ObservationIgnored private let defaults: UserDefaults
 
     enum ThemeMode: String, CaseIterable, Identifiable {
         case system, light, dark
@@ -19,19 +20,28 @@ final class AppearanceSettings {
     }
 
     var themeMode: ThemeMode {
-        didSet { UserDefaults.standard.set(themeMode.rawValue, forKey: "themeMode") }
+        didSet { defaults.set(themeMode.rawValue, forKey: "themeMode") }
     }
     var accentIndex: Int {
-        didSet { UserDefaults.standard.set(accentIndex, forKey: "accentIndex") }
+        didSet { defaults.set(accentIndex, forKey: "accentIndex") }
     }
     var messageTextSize: Double {
-        didSet { UserDefaults.standard.set(messageTextSize, forKey: "messageTextSize") }
+        didSet { defaults.set(messageTextSize, forKey: "messageTextSize") }
+    }
+    var premiumPalette: PremiumPalette {
+        didSet { defaults.set(premiumPalette.rawValue, forKey: "premiumPalette") }
+    }
+    var premiumChatStyle: Bool {
+        didSet { defaults.set(premiumChatStyle, forKey: "premiumChatStyle") }
     }
 
-    init() {
-        themeMode = ThemeMode(rawValue: UserDefaults.standard.string(forKey: "themeMode") ?? "") ?? .system
-        accentIndex = UserDefaults.standard.object(forKey: "accentIndex") as? Int ?? 0
-        messageTextSize = UserDefaults.standard.object(forKey: "messageTextSize") as? Double ?? 16
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        themeMode = ThemeMode(rawValue: defaults.string(forKey: "themeMode") ?? "") ?? .system
+        accentIndex = defaults.object(forKey: "accentIndex") as? Int ?? 0
+        messageTextSize = Self.validTextSize(defaults.object(forKey: "messageTextSize") as? Double ?? 16)
+        premiumPalette = PremiumPalette(rawValue: defaults.string(forKey: "premiumPalette") ?? "") ?? .aurora
+        premiumChatStyle = defaults.object(forKey: "premiumChatStyle") as? Bool ?? true
     }
 
     var colorScheme: ColorScheme? {
@@ -42,7 +52,48 @@ final class AppearanceSettings {
         }
     }
 
-    var accent: Color { Theme.accents[accentIndex % Theme.accents.count] }
+    var accent: Color { Theme.accents[Self.validAccentIndex(accentIndex)] }
+
+    static func validAccentIndex(_ value: Int) -> Int {
+        Theme.accents.indices.contains(value) ? value : 0
+    }
+
+    static func validTextSize(_ value: Double) -> Double {
+        value.isFinite ? min(24, max(12, value)) : 16
+    }
+
+    func outgoingStyle(localPremium: Bool) -> AnyShapeStyle {
+        if localPremium && premiumChatStyle { return AnyShapeStyle(premiumPalette.gradient) }
+        return AnyShapeStyle(accent.gradient)
+    }
+}
+
+enum PremiumPalette: String, CaseIterable, Identifiable {
+    case aurora, ocean, sunset
+    var id: String { rawValue }
+    var title: String { L("PremiumPalette_" + rawValue) }
+    var colors: [Color] {
+        switch self {
+        case .aurora: return [Color(red: 0.39, green: 0.28, blue: 0.88), Color(red: 0.68, green: 0.23, blue: 0.69)]
+        case .ocean: return [Color(red: 0.08, green: 0.41, blue: 0.75), Color(red: 0.04, green: 0.48, blue: 0.53)]
+        case .sunset: return [Color(red: 0.76, green: 0.24, blue: 0.36), Color(red: 0.66, green: 0.28, blue: 0.70)]
+        }
+    }
+    var gradient: LinearGradient {
+        LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+}
+
+struct ChatBackdrop: View {
+    @Environment(AyuConfig.self) private var ayu
+    @Environment(AppearanceSettings.self) private var appearance
+    var body: some View {
+        Theme.chatBackground.overlay {
+            if ayu.localPremium && appearance.premiumChatStyle {
+                appearance.premiumPalette.gradient.opacity(0.14)
+            }
+        }
+    }
 }
 
 enum Theme {
@@ -68,14 +119,16 @@ enum Theme {
     ]
 
     static func avatarGradient(for id: Int64, colorId: Int? = nil) -> LinearGradient {
-        let idx = colorId.map { $0 % 7 } ?? Int(abs(id) % 7)
+        let idx = colorId.map { max(0, $0 % 7) } ?? avatarIndex(for: id)
         let pair = avatarColors[max(0, min(idx, 6))]
         return LinearGradient(colors: [pair.0, pair.1], startPoint: .top, endPoint: .bottom)
     }
 
     static func nameColor(for id: Int64) -> Color {
-        avatarColors[Int(abs(id) % 7)].1
+        avatarColors[avatarIndex(for: id)].1
     }
+
+    static func avatarIndex(for id: Int64) -> Int { Int(id.magnitude % 7) }
 
     static let incomingBubble = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.17, alpha: 1) : .white })
     static let chatBackground = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.06, alpha: 1) : UIColor(red: 0.89, green: 0.90, blue: 0.93, alpha: 1) })
