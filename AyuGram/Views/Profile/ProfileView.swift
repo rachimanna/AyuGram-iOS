@@ -28,7 +28,7 @@ struct ProfileView: View {
                         if user?.id == service.myUserId { LocalIdentityName(name: service.chatTitle(chatId)).font(.title2.bold()) }
                         else { Text(service.chatTitle(chatId)).font(.title2.bold()).multilineTextAlignment(.center) }
                         if user?.isPremium == true || (user?.id == service.myUserId && ayu.localPremium) {
-                            Image(systemName: "star.fill").foregroundStyle(.purple)
+                            PremiumBadge()
                         }
                         if user?.isVerified == true { Image(systemName: "checkmark.seal.fill").foregroundStyle(.tint) }
                     }

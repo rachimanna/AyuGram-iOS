@@ -50,6 +50,12 @@ struct ChatPrivacyView: View {
                     Text(L("Immediately")).tag(0)
                     Text(L("ReadByButton")).tag(-1)
                     ForEach([5, 10, 30, 60, 300], id: \.self) { Text(LF("SecondsCount", $0)).tag($0) }
+                    if settings.readDelay > 0 && ![5, 10, 30, 60, 300].contains(settings.readDelay) {
+                        Text(LF("SecondsCount", settings.readDelay)).tag(settings.readDelay)
+                    }
+                }
+                if settings.readDelay > 0 {
+                    Stepper(LF("SecondsCount", settings.readDelay), value: binding(\.readDelay), in: 1...3600)
                 }
             } footer: { Text(L("DelayedReadHint")) }
             Section {
@@ -110,7 +116,8 @@ struct ChatWallpaper: View {
     private var settings: ChatPrivacy { PrivacyPreferences.shared.chat(chatId) }
     var body: some View {
         ZStack {
-            (Color(hex: settings.wallpaperHex) ?? Theme.chatBackground)
+            if let color = Color(hex: settings.wallpaperHex) { color }
+            else { ChatBackdrop() }
             if let image { Image(uiImage: image).resizable().scaledToFill().opacity(0.75) }
         }.clipped().ignoresSafeArea()
         .task(id: settings.wallpaperFile) {
