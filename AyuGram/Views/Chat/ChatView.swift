@@ -132,11 +132,13 @@ struct ChatView: View {
             MessageRow(message: m, chat: chat, isRead: model.isRead(m), model: model, onMedia: { item in service.mediaOpened(m); mediaViewer = item })
                 .contextMenu { menu(for: m) }
                 .onAppear { model.messageAppeared(m) }
+                .onDisappear { model.messageDisappeared(m) }
                 .id(m.id)
         case .album(let ms):
             AlbumRow(messages: ms, chat: chat, isRead: ms.last.map(model.isRead) ?? false, onMedia: { item in mediaViewer = item })
                 .contextMenu { if let first = ms.first { menu(for: first) } }
                 .onAppear { ms.forEach(model.messageAppeared) }
+                .onDisappear { ms.forEach(model.messageDisappeared) }
         case .sponsored(let title, let text, let url):
             SponsoredCard(title: title, text: text, url: url)
         }

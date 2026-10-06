@@ -263,6 +263,7 @@ final class ChatViewModel: ChatEventSink {
     // MARK: - Viewing (read packets)
 
     func messageAppeared(_ m: MessageItem) {
+        service.setMessageDisplayed(chatId: chatId, messageId: m.id, displayed: true)
         service.preserveViewed(m)
         guard !m.isOutgoing, !m.ayuDeleted, m.id > 0 else { return }
         pendingViews.insert(m.id)
@@ -272,6 +273,10 @@ final class ChatViewModel: ChatEventSink {
             guard !Task.isCancelled else { return }
             self?.flushViews()
         }
+    }
+
+    func messageDisappeared(_ m: MessageItem) {
+        service.setMessageDisplayed(chatId: chatId, messageId: m.id, displayed: false)
     }
 
     private func flushViews() {

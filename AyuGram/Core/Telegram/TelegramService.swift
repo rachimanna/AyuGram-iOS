@@ -106,6 +106,7 @@ final class TelegramService {
     @ObservationIgnored private var chatActionTimers: [Int64: Task<Void, Never>] = [:]
     @ObservationIgnored private var isAppActive = true
     @ObservationIgnored private var activeChatId: Int64?
+    @ObservationIgnored private var displayedMessageIds: [Int64: Set<Int64>] = [:]
     @ObservationIgnored private var pendingReadTasks: [Int64: Task<Void, Never>] = [:]
     @ObservationIgnored private var pendingReadDates: [Int64: [Int64: Foundation.Date]] = [:]
     @ObservationIgnored private var onlineTask: Task<Void, Never>?
@@ -388,7 +389,7 @@ final class TelegramService {
         folders = []
         chatActions = [:]
         myUserId = 0
-        cancelPendingReads(); activeChatId = nil; ephemeralKeys = []; viewedEphemeral = [:]
+        cancelPendingReads(); activeChatId = nil; displayedMessageIds = [:]; ephemeralKeys = []; viewedEphemeral = [:]
         PrivacyPreferences.shared.selectAccount(0)
         LocalReadStore.shared.selectAccount(0)
         LocalAutomation.shared.selectAccount(0)
@@ -771,6 +772,7 @@ final class TelegramService {
     }
 
     func closeChat(_ chatId: Int64) async {
+        displayedMessageIds[chatId] = nil
         pendingReadTasks.removeValue(forKey: chatId)?.cancel(); pendingReadDates[chatId] = nil
         if activeChatId == chatId { activeChatId = nil; applyOnlineStatus() }
         _ = try? await client?.closeChat(chatId: chatId)
@@ -1157,9 +1159,18 @@ final class TelegramService {
     // MARK: - Sponsored messages (AyuConfig.disableAds)
 
     func reportSecretScreenshot(chatId: Int64) async {
-        guard case .secret = chats[chatId]?.kind, let client else { return }
-        do { try await client.sendChatScreenshotTakenNotification(chatId: chatId) }
+        guard case .secret = chats[chatId]?.kind, activeChatId == chatId,
+              AppLock.shared.canShowContent, let client,
+              let ids = displayedMessageIds[chatId], !ids.isEmpty else { return }
+        // TDLib 1.8.67 reports captures through the screenshot view source.
+        do { try await client.viewMessages(chatId: chatId, forceRead: false, messageIds: Array(ids), source: .messageSourceScreenshot) }
         catch { AppLog.debug("Secret screenshot notification: \(error)") }
+    }
+
+    func setMessageDisplayed(chatId: Int64, messageId: Int64, displayed: Bool) {
+        guard messageId > 0 else { return }
+        if displayed { displayedMessageIds[chatId, default: []].insert(messageId) }
+        else { displayedMessageIds[chatId]?.remove(messageId) }
     }
 
     func sponsoredMessage(chatId: Int64) async -> (title: String, text: String, url: String)? {
