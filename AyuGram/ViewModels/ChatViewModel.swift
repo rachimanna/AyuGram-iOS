@@ -89,7 +89,7 @@ final class ChatViewModel: ChatEventSink {
     func onDisappear() async {
         service.unsubscribe(chatId: chatId, self)
         viewFlushTask?.cancel()
-        flushViews()
+        pendingViews = []
         await service.saveDraft(chatId: chatId, text: composerText)
         await service.closeChat(chatId)
         didOpen = false
@@ -262,6 +262,7 @@ final class ChatViewModel: ChatEventSink {
     // MARK: - Viewing (read packets)
 
     func messageAppeared(_ m: MessageItem) {
+        service.preserveViewed(m)
         guard !m.isOutgoing, !m.ayuDeleted, m.id > 0 else { return }
         pendingViews.insert(m.id)
         viewFlushTask?.cancel()

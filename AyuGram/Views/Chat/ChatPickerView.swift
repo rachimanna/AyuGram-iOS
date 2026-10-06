@@ -11,7 +11,7 @@ struct ChatPickerView: View {
     @State private var query = ""
 
     private var ids: [Int64] {
-        let all = service.sortedChatIds(in: .main)
+        let all = service.sortedChatIds(in: .main).filter { service.chats[$0].map(AppLock.shared.visible) ?? false }
         guard !query.isEmpty else { return all }
         return all.filter { service.chatTitle($0).localizedCaseInsensitiveContains(query) }
     }

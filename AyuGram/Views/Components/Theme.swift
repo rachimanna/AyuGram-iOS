@@ -28,10 +28,29 @@ final class AppearanceSettings {
         didSet { UserDefaults.standard.set(messageTextSize, forKey: "messageTextSize") }
     }
 
+    var roundedAvatars: Bool { didSet { UserDefaults.standard.set(roundedAvatars, forKey: "ayuRoundedAvatars") } }
+    var compactMode: Bool { didSet { UserDefaults.standard.set(compactMode, forKey: "ayuCompactMode") } }
+    var animationsEnabled: Bool { didSet { UserDefaults.standard.set(animationsEnabled, forKey: "ayuAnimations") } }
+    var useCustomAccent: Bool { didSet { UserDefaults.standard.set(useCustomAccent, forKey: "ayuUseCustomAccent") } }
+    var customAccentHex: String { didSet { UserDefaults.standard.set(customAccentHex, forKey: "ayuAccentHex") } }
+    var localEmojiStatus: String { didSet { UserDefaults.standard.set(localEmojiStatus, forKey: "ayuLocalEmoji") } }
+    var animateOwnName: Bool { didSet { UserDefaults.standard.set(animateOwnName, forKey: "ayuAnimateName") } }
+    var showContactsTab: Bool { didSet { UserDefaults.standard.set(showContactsTab, forKey: "ayuShowContacts") } }
+    var showCallsTab: Bool { didSet { UserDefaults.standard.set(showCallsTab, forKey: "ayuShowCalls") } }
+
     init() {
+        roundedAvatars = UserDefaults.standard.object(forKey: "ayuRoundedAvatars") as? Bool ?? true
+        compactMode = UserDefaults.standard.bool(forKey: "ayuCompactMode")
+        animationsEnabled = UserDefaults.standard.object(forKey: "ayuAnimations") as? Bool ?? true
+        useCustomAccent = UserDefaults.standard.bool(forKey: "ayuUseCustomAccent")
+        customAccentHex = UserDefaults.standard.string(forKey: "ayuAccentHex") ?? "#7D5CFF"
+        localEmojiStatus = UserDefaults.standard.string(forKey: "ayuLocalEmoji") ?? ""
+        animateOwnName = UserDefaults.standard.bool(forKey: "ayuAnimateName")
+        showContactsTab = UserDefaults.standard.object(forKey: "ayuShowContacts") as? Bool ?? true
+        showCallsTab = UserDefaults.standard.bool(forKey: "ayuShowCalls")
         themeMode = ThemeMode(rawValue: UserDefaults.standard.string(forKey: "themeMode") ?? "") ?? .system
         accentIndex = UserDefaults.standard.object(forKey: "accentIndex") as? Int ?? 0
-        messageTextSize = UserDefaults.standard.object(forKey: "messageTextSize") as? Double ?? 16
+        messageTextSize = max(12, min(24, UserDefaults.standard.object(forKey: "messageTextSize") as? Double ?? 16))
     }
 
     var colorScheme: ColorScheme? {
@@ -42,7 +61,10 @@ final class AppearanceSettings {
         }
     }
 
-    var accent: Color { Theme.accents[accentIndex % Theme.accents.count] }
+    var accent: Color {
+        if useCustomAccent, let color = Color(hex: customAccentHex) { return color }
+        return Theme.accents[max(0, accentIndex) % Theme.accents.count]
+    }
 }
 
 enum Theme {
@@ -68,13 +90,13 @@ enum Theme {
     ]
 
     static func avatarGradient(for id: Int64, colorId: Int? = nil) -> LinearGradient {
-        let idx = colorId.map { $0 % 7 } ?? Int(abs(id) % 7)
+        let idx = colorId.map { $0 % 7 } ?? Int(id.magnitude % 7)
         let pair = avatarColors[max(0, min(idx, 6))]
         return LinearGradient(colors: [pair.0, pair.1], startPoint: .top, endPoint: .bottom)
     }
 
     static func nameColor(for id: Int64) -> Color {
-        avatarColors[Int(abs(id) % 7)].1
+        avatarColors[Int(id.magnitude % 7)].1
     }
 
     static let incomingBubble = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.17, alpha: 1) : .white })

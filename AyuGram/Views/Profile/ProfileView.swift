@@ -25,7 +25,8 @@ struct ProfileView: View {
                                isSavedMessages: chat?.isSavedMessages ?? false)
                         .onTapGesture { if chat?.photo?.big != nil { showAvatar = true } }
                     HStack(spacing: 6) {
-                        Text(service.chatTitle(chatId)).font(.title2.bold()).multilineTextAlignment(.center)
+                        if user?.id == service.myUserId { LocalIdentityName(name: service.chatTitle(chatId)).font(.title2.bold()) }
+                        else { Text(service.chatTitle(chatId)).font(.title2.bold()).multilineTextAlignment(.center) }
                         if user?.isPremium == true || (user?.id == service.myUserId && ayu.localPremium) {
                             Image(systemName: "star.fill").foregroundStyle(.purple)
                         }
@@ -39,7 +40,7 @@ struct ProfileView: View {
 
             Section {
                 if let user {
-                    if !user.phoneNumber.isEmpty {
+                    if !user.phoneNumber.isEmpty && !(user.id == service.myUserId && PrivacyPreferences.shared.snapshot.hideOwnPhone) {
                         info(L("Phone"), "+" + user.phoneNumber, copy: "+" + user.phoneNumber)
                     }
                     if let username = user.username {
@@ -115,6 +116,7 @@ struct ProfileView: View {
 
     private var subtitle: String {
         guard let chat else { return "" }
+        if user?.id == service.myUserId && PrivacyPreferences.shared.snapshot.hideOwnPresence { return "" }
         switch chat.kind {
         case .savedMessages: return ""
         case .user, .bot, .secret: return user.map { Formatters.presence($0.status) } ?? ""
@@ -142,8 +144,11 @@ struct ContactsView: View {
     @State private var contacts: [UserItem] = []
     @State private var query = ""
 
+    private var visibleContacts: [UserItem] {
+        contacts.filter { user in !service.chats.values.contains { $0.kind.privateUserId == user.id && !AppLock.shared.visible($0) } }
+    }
     private var filtered: [UserItem] {
-        query.isEmpty ? contacts : contacts.filter { $0.fullName.localizedCaseInsensitiveContains(query) || ($0.username ?? "").localizedCaseInsensitiveContains(query) }
+        query.isEmpty ? visibleContacts : visibleContacts.filter { $0.fullName.localizedCaseInsensitiveContains(query) || ($0.username ?? "").localizedCaseInsensitiveContains(query) }
     }
 
     var body: some View {
@@ -158,7 +163,7 @@ struct ContactsView: View {
                         AvatarView(id: user.id, title: user.fullName, photo: user.photo, size: 44, colorId: user.accentColorId)
                         VStack(alignment: .leading) {
                             Text(user.fullName).foregroundStyle(.primary)
-                            Text(Formatters.presence(user.status))
+                            Text(user.id == service.myUserId && PrivacyPreferences.shared.snapshot.hideOwnPresence ? "" : Formatters.presence(user.status))
                                 .font(.caption)
                                 .foregroundStyle(isOnline(user) ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                         }

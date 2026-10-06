@@ -36,7 +36,7 @@ struct ChatView: View {
             }
             ComposerBar(model: model)
         }
-        .background(Theme.chatBackground.ignoresSafeArea())
+        .background { GeometryReader { geometry in ChatWallpaper(chatId: chatId).frame(width: geometry.size.width, height: geometry.size.height).clipped() } }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -45,6 +45,7 @@ struct ChatView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    NavigationLink(L("ChatPrivacy")) { ChatPrivacyView(chatId: chatId) }
                     NavigationLink(value: Route.deletedMessages(chatId: chatId)) {
                         Label(L("DeletedMessages"), systemImage: "trash.slash")
                     }
@@ -128,12 +129,12 @@ struct ChatView: View {
                 .background(Color.black.opacity(0.25), in: Capsule())
                 .padding(.vertical, 6)
         case .message(let m):
-            MessageRow(message: m, chat: chat, isRead: model.isRead(m), model: model, onMedia: { mediaViewer = $0 })
+            MessageRow(message: m, chat: chat, isRead: model.isRead(m), model: model, onMedia: { item in service.mediaOpened(m); mediaViewer = item })
                 .contextMenu { menu(for: m) }
                 .onAppear { model.messageAppeared(m) }
                 .id(m.id)
         case .album(let ms):
-            AlbumRow(messages: ms, chat: chat, isRead: ms.last.map(model.isRead) ?? false, onMedia: { mediaViewer = $0 })
+            AlbumRow(messages: ms, chat: chat, isRead: ms.last.map(model.isRead) ?? false, onMedia: { item in mediaViewer = item })
                 .contextMenu { if let first = ms.first { menu(for: first) } }
                 .onAppear { ms.forEach(model.messageAppeared) }
         case .sponsored(let title, let text, let url):
@@ -162,7 +163,7 @@ struct ChatView: View {
             Button { historyFor = m } label: { Label(L("EditsHistoryMenu"), systemImage: "clock.arrow.circlepath") }
         }
         // --- AyuGram: OPTION_READ_UNTIL (only meaningful when read packets are suppressed)
-        if !ayu.sendReadPackets && !m.isOutgoing && !m.ayuDeleted {
+        if (!PrivacyPreferences.shared.sendsRead(chatId) || PrivacyPreferences.shared.chat(chatId).readDelay != 0) && !m.isOutgoing && !m.ayuDeleted {
             Button { Task { await model.readUntil(m) } } label: { Label(L("ReadUntilMenuText"), systemImage: "eye") }
         }
         Button { detailsFor = m } label: { Label(L("Details"), systemImage: "info.circle") }
@@ -212,7 +213,7 @@ struct ChatHeader: View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
                 Text(service.chatTitle(chatId)).font(.headline).lineLimit(1)
-                if ayu.isGhostModeActive { GhostGlyph().frame(width: 14, height: 14) }
+                if PrivacyPreferences.shared.isGhost(chatId) { GhostGlyph().frame(width: 14, height: 14) }
             }
             Text(subtitle(chat))
                 .font(.caption)
@@ -232,6 +233,7 @@ struct ChatHeader: View {
         switch chat.kind {
         case .savedMessages: return ""
         case .user(let uid), .bot(let uid), .secret(let uid):
+            if uid == service.myUserId && PrivacyPreferences.shared.snapshot.hideOwnPresence { return "" }
             return service.users[uid].map { Formatters.presence($0.status) } ?? ""
         case .basicGroup(let id):
             return Formatters.members(service.basicGroupMembers[id] ?? 0, channel: false)

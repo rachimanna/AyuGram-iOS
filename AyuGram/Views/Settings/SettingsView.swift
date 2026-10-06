@@ -16,13 +16,13 @@ struct SettingsView: View {
                         AvatarView(id: service.myUserId, title: me?.fullName ?? "", photo: me?.photo, size: 64, colorId: me?.accentColorId)
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 6) {
-                                Text(me?.fullName ?? "").font(.title3.bold())
+                                LocalIdentityName(name: me?.fullName ?? "").font(.title3.bold())
                                 // AyuGram "Local Telegram Premium" (client-side only, like on Android).
                                 if me?.isPremium == true || ayu.localPremium {
                                     Image(systemName: "star.fill").foregroundStyle(.purple)
                                 }
                             }
-                            if let phone = me?.phoneNumber, !phone.isEmpty { Text("+" + phone).foregroundStyle(.secondary) }
+                            if !PrivacyPreferences.shared.snapshot.hideOwnPhone, let phone = me?.phoneNumber, !phone.isEmpty { Text("+" + phone).foregroundStyle(.secondary) }
                             if let username = me?.username { Text("@" + username).foregroundStyle(.secondary) }
                         }
                     }
@@ -50,6 +50,13 @@ struct SettingsView: View {
                     } label: {
                         Label(L("Devices"), systemImage: "laptopcomputer.and.iphone")
                     }
+                }
+
+                Section {
+                    NavigationLink(L("Privacy"), destination: PrivacySettingsView())
+                    NavigationLink(L("PrivacyAndSecurity"), destination: SecuritySettingsView())
+                    NavigationLink(L("Customization"), destination: CustomizationView())
+                    NavigationLink(L("DeletedFolder"), destination: UnifiedHistoryView())
                 }
 
                 Section {
