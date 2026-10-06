@@ -66,15 +66,20 @@ jobs:
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
             -clonedSourcePackagesDirPath build/SourcePackages \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | xcbeautify
 
       - name: Package IPA
         run: |
           mkdir -p Payload
           cp -R build/DerivedData/Build/Products/Release-iphoneos/AyuGram.app Payload/
-          zip -qry AyuGram-unsigned.ipa Payload
+          zip -9 -qry AyuGram-unsigned.ipa Payload
+          python3 scripts/measure_ipa.py AyuGram-unsigned.ipa
+          cat AyuGram-size-report.json >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
           name: AyuGram-unsigned-ipa
-          path: AyuGram-unsigned.ipa
+          path: |
+            AyuGram-unsigned.ipa
+            AyuGram-size-report.json

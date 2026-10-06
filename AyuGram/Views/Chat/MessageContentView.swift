@@ -26,7 +26,14 @@ struct MessageContentView: View {
                     .onTapGesture { onMedia(.photo(p)) }
                 captionView(caption)
             }
-        case .video(let v, let caption), .animation(let v, let caption):
+        case .animation(let v, let caption):
+            VStack(alignment: .leading, spacing: 6) {
+                InlineAnimationView(video: v, autoDownload: !isFiltered)
+                    .frame(width: mediaSize(v.width, v.height).width, height: mediaSize(v.width, v.height).height)
+                    .onTapGesture { onMedia(.video(v)) }
+                captionView(caption)
+            }
+        case .video(let v, let caption):
             VStack(alignment: .leading, spacing: 6) {
                 MediaImage(file: v.thumb?.file, thumb: v.thumb)
                     .frame(width: mediaSize(v.width, v.height).width, height: mediaSize(v.width, v.height).height)
@@ -44,7 +51,7 @@ struct MessageContentView: View {
                 .overlay { PlayBadge() }
                 .onTapGesture { onMedia(.video(v)) }
         case .sticker(let s):
-            StickerView(sticker: s)
+            StickerView(sticker: s, autoDownload: !isFiltered)
         case .document(let d, let caption):
             VStack(alignment: .leading, spacing: 6) {
                 DocumentRow(document: d, isOutgoing: isOutgoing)
@@ -66,7 +73,7 @@ struct MessageContentView: View {
                 }
             }
         case .poll(let p):
-            PollView(poll: p, isOutgoing: isOutgoing)
+            PollView(poll: p, message: message, isOutgoing: isOutgoing)
         case .animatedEmoji(let e):
             Text(e).font(.system(size: 64))
         case .dice(let e, let value):
@@ -127,16 +134,20 @@ struct MessageContentView: View {
 
 struct StickerView: View {
     let sticker: StickerItem
+    var preferredWidth: CGFloat = 170
+    var autoDownload = true
 
     var body: some View {
-        let size = CGSize(width: 170, height: sticker.width > 0 ? 170 * CGFloat(sticker.height) / CGFloat(max(sticker.width, 1)) : 170)
+        let size = CGSize(width: preferredWidth, height: sticker.width > 0 ? preferredWidth * CGFloat(sticker.height) / CGFloat(max(sticker.width, 1)) : preferredWidth)
         Group {
             switch sticker.format {
             case .webp:
-                MediaImage(file: sticker.file, thumb: sticker.thumb, contentMode: .fit, maxPixel: 512)
+                MediaImage(file: sticker.file, thumb: sticker.thumb, contentMode: .fit, maxPixel: 512, autoDownload: autoDownload)
                     .background(Color.clear)
-            case .tgs, .webm:
-                // Animated stickers (Lottie / VP9) need dedicated renderers; show the static thumbnail.
+            case .tgs:
+                TGSStickerView(sticker: sticker, autoDownload: autoDownload)
+            case .webm:
+                // WebM/VP9 requires a separate decoder; retain the thumbnail fallback.
                 if sticker.thumb?.file != nil {
                     MediaImage(file: sticker.thumb?.file, contentMode: .fit, maxPixel: 512)
                 } else {
@@ -302,28 +313,60 @@ struct LocationPreview: View {
 
 struct PollView: View {
     let poll: PollItem
+    let message: MessageItem
     let isOutgoing: Bool
+    @Environment(TelegramService.self) private var service
+    @State private var selection: Set<Int> = []
+    @State private var submitting = false
+    @State private var error: String?
 
+    private var canVote: Bool { !poll.isClosed && !message.ayuDeleted && poll.canVote != false && !submitting }
+    private var chosen: Set<Int> { Set(poll.options.indices.filter { poll.options[$0].isChosen }) }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(poll.question).font(.headline)
             Text(poll.isQuiz ? L("Quiz") : L("Poll")).font(.caption).opacity(0.7)
-            ForEach(Array(poll.options.enumerated()), id: \.offset) { _, option in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text("\(option.votePercentage)%").font(.caption.bold()).frame(width: 40, alignment: .leading)
-                        Text(option.text).font(.subheadline)
-                        if option.isChosen { Image(systemName: "checkmark.circle.fill").font(.caption) }
-                    }
-                    GeometryReader { geo in
-                        Capsule().fill(isOutgoing ? Color.white : Color.accentColor)
-                            .frame(width: max(4, geo.size.width * CGFloat(option.votePercentage) / 100))
-                    }
-                    .frame(height: 4)
-                }
+            ForEach(Array(poll.options.enumerated()), id: \.offset) { index, option in
+                Button {
+                    if poll.allowsMultipleAnswers == true {
+                        if selection.contains(index) { selection.remove(index) } else { selection.insert(index) }
+                    } else { Task { await vote([index]) } }
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            if poll.canSeeResults != false { Text("\(option.votePercentage)%").font(.caption.bold()).frame(width: 40, alignment: .leading) }
+                            Text(option.text).font(.subheadline)
+                            if option.isChosen || selection.contains(index) { Image(systemName: "checkmark.circle.fill").font(.caption) }
+                        }
+                        if poll.canSeeResults != false {
+                            GeometryReader { geometry in
+                                Capsule().fill(isOutgoing ? Color.white : Color.accentColor)
+                                    .frame(width: max(4, geometry.size.width * CGFloat(option.votePercentage) / 100))
+                            }.frame(height: 4)
+                        }
+                    }.contentShape(Rectangle())
+                }.buttonStyle(.plain).disabled(!canVote)
+            }
+            if poll.allowsMultipleAnswers == true && !poll.isClosed && !message.ayuDeleted {
+                Button(L("Vote")) { Task { await vote(selection.sorted()) } }.disabled(!canVote || selection.isEmpty)
+            }
+            if !chosen.isEmpty && !poll.isQuiz && !poll.isClosed && !message.ayuDeleted {
+                Button(L("RetractVote")) { Task { await vote([]) } }.font(.caption).disabled(!canVote)
             }
             Text(LF("VotesCount", poll.totalVoters)).font(.caption).opacity(0.7)
+            if poll.isClosed { Text(L("PollClosed")).font(.caption) }
+            if let error { Text(error).font(.caption).foregroundStyle(.red) }
         }
         .frame(minWidth: 220)
+        .onAppear { selection = chosen }
+        .onChange(of: chosen) { _, value in selection = value }
+    }
+
+    private func vote(_ ids: [Int]) async {
+        guard canVote else { return }
+        submitting = true; error = nil
+        defer { submitting = false }
+        do { try await service.vote(chatId: message.chatId, messageId: message.id, options: ids) }
+        catch { self.error = TelegramService.describe(error) }
     }
 }

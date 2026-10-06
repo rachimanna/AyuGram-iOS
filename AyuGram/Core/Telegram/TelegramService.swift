@@ -56,6 +56,8 @@ enum ChatEvent {
     case newMessage(MessageItem)
     case sendSucceeded(oldId: Int64, message: MessageItem)
     case sendFailed(oldId: Int64, message: MessageItem)
+    case replyMarkupChanged(messageId: Int64, rows: [[BotButtonItem]]?)
+    case pollChanged(id: Int64, poll: PollItem)
     case contentChanged(messageId: Int64, body: MessageBody)
     case edited(messageId: Int64, editDate: Int)
     case deleted(messageIds: [Int64], saved: [MessageItem])
@@ -92,6 +94,11 @@ final class TelegramService {
     /// chatId → "Alice is typing…"
     var chatActions: [Int64: String] = [:]
     var totalUnread: Int = 0
+    var botKeyboards: [Int64: BotReplyKeyboard] = [:]
+    var storyGroups: [Int64: ChatStoryGroup] = [:]
+    var storiesLoading = false
+    var storiesLoadedAll = false
+    var storiesError: String?
 
     let files = FileStore()
 
@@ -394,6 +401,8 @@ final class TelegramService {
         LocalReadStore.shared.selectAccount(0)
         LocalAutomation.shared.selectAccount(0)
         AppLock.shared.accountChanged()
+        botKeyboards = [:]
+        storyGroups = [:]; storiesLoading = false; storiesLoadedAll = false; storiesError = nil
         chatListLoadedAll = []
         chatListLoading = []
         files.reset()
@@ -423,6 +432,13 @@ final class TelegramService {
 
     private func handle(_ update: Update) {
         switch update {
+        case .updateChatReplyMarkup(let u):
+            botKeyboards[u.chatId] = u.replyMarkupMessage.flatMap(TDConvert.replyKeyboard)
+        case .updateChatActiveStories(let u):
+            applyActiveStories(u.activeStories)
+        case .updateStoryDeleted(let u):
+            storyGroups[u.storyPosterChatId]?.references.removeAll { $0.storyId == u.storyId }
+            if storyGroups[u.storyPosterChatId]?.references.isEmpty == true { storyGroups[u.storyPosterChatId] = nil }
         case .updateAuthorizationState(let u):
             handleAuthorization(u.authorizationState)
 
@@ -530,6 +546,9 @@ final class TelegramService {
             dispatch(item.chatId, .sendSucceeded(oldId: u.oldMessageId, message: item))
         case .updateMessageSendFailed(let u):
             dispatch(u.message.chatId, .sendFailed(oldId: u.oldMessageId, message: convert(u.message)))
+        case .updatePoll(let u):
+            let poll = TDConvert.poll(u.poll)
+            for chatId in Array(sinks.keys) { dispatch(chatId, .pollChanged(id: u.poll.id.rawValue, poll: poll)) }
         case .updateMessageContent(let u):
             // --- AyuGram hook: edits history (AyuMessagesController.onMessageEdited)
             let body = TDConvert.body(u.newContent, sender: .chat(u.chatId), names: nameOf)
@@ -537,6 +556,7 @@ final class TelegramService {
             ayu.onMessageContentChanged(chatId: u.chatId, messageId: u.messageId, newBody: body, context: ayuContext(u.chatId))
             dispatch(u.chatId, .contentChanged(messageId: u.messageId, body: body))
         case .updateMessageEdited(let u):
+            dispatch(u.chatId, .replyMarkupChanged(messageId: u.messageId, rows: TDConvert.inlineKeyboard(u.replyMarkup)))
             ayu.onMessageEditDateChanged(chatId: u.chatId, messageId: u.messageId, editDate: u.editDate)
             dispatch(u.chatId, .edited(messageId: u.messageId, editDate: u.editDate))
         case .updateDeleteMessages(let u):
@@ -769,6 +789,10 @@ final class TelegramService {
         guard let chat = chats[chatId], AppLock.shared.visible(chat), AppLock.shared.canShowContent else { return }
         activeChatId = chatId; applyOnlineStatus()
         _ = try? await client?.openChat(chatId: chatId)
+        if let client, let raw = try? await client.getChat(chatId: chatId), raw.replyMarkupMessageId != 0,
+           let message = try? await client.getMessage(chatId: chatId, messageId: raw.replyMarkupMessageId) {
+            botKeyboards[chatId] = TDConvert.replyKeyboard(message)
+        }
     }
 
     func closeChat(_ chatId: Int64) async {
@@ -877,15 +901,12 @@ final class TelegramService {
 
     // MARK: - Sending (SendMessagesHelper hooks: scheduled sending, read after send)
 
-    private func sendOptions() -> MessageSendOptions {
+    private func sendOptions(delivery: MessageDelivery = MessageDelivery()) -> MessageSendOptions {
         var scheduling: MessageSchedulingState?
-        if config.useScheduledMessages {
-            // "If the schedule_date is less than 10 seconds in the future, the message will be sent immediately".
-            // AyuGram: now + 10 + 1 second safety window.
-            let date = Int(Date().timeIntervalSince1970) + 12
+        if let date = delivery.sendDate(now: Date(), ayuScheduled: config.useScheduledMessages) {
             scheduling = .messageSchedulingStateSendAtDate(MessageSchedulingStateSendAtDate(repeatPeriod: 0, sendDate: date))
         }
-        return MessageSendOptions(allowPaidBroadcast: false, disableNotification: false, effectId: TdInt64(0),
+        return MessageSendOptions(allowPaidBroadcast: false, disableNotification: delivery.silent, effectId: TdInt64(0),
                                   fromBackground: false, onlyPreview: false, paidMessageStarCount: 0,
                                   protectContent: false, schedulingState: scheduling, sendingId: 0,
                                   suggestedPostInfo: nil, updateOrderOfInstalledStickerSets: false)
@@ -897,19 +918,19 @@ final class TelegramService {
     }
 
     @discardableResult
-    func send(chatId: Int64, content: InputMessageContent, replyToMessageId: Int64?) async throws -> MessageItem? {
+    func send(chatId: Int64, content: InputMessageContent, replyToMessageId: Int64?, delivery: MessageDelivery = MessageDelivery()) async throws -> MessageItem? {
         guard let client, authStep == .ready else { throw TelegramServiceError.notReady }
         // Remember the newest incoming message before our own message becomes the chat's last one.
         let lastIncoming = chats[chatId]?.lastMessage.flatMap { $0.isOutgoing ? nil : $0.id }
-        let sent = try await client.sendMessage(chatId: chatId, inputMessageContent: content, options: sendOptions(),
+        let sent = try await client.sendMessage(chatId: chatId, inputMessageContent: content, options: sendOptions(delivery: delivery),
                                                 replyMarkup: nil, replyTo: replyTo(replyToMessageId), topicId: nil)
         afterSend(chatId: chatId, lastIncoming: lastIncoming)
         return convert(sent)
     }
 
-    func sendText(chatId: Int64, text: RichText, replyToMessageId: Int64?) async throws {
+    func sendText(chatId: Int64, text: RichText, replyToMessageId: Int64?, delivery: MessageDelivery = MessageDelivery()) async throws {
         let content = InputMessageContent.inputMessageText(InputMessageText(clearDraft: true, linkPreviewOptions: nil, text: text.formattedText))
-        try await send(chatId: chatId, content: content, replyToMessageId: replyToMessageId)
+        try await send(chatId: chatId, content: content, replyToMessageId: replyToMessageId, delivery: delivery)
     }
 
     func sendPhoto(chatId: Int64, path: String, width: Int, height: Int, caption: String, replyToMessageId: Int64?) async throws {
@@ -1124,6 +1145,72 @@ final class TelegramService {
     }
 
     // MARK: - Files
+
+    // MARK: - Stories
+
+    var orderedStoryGroups: [ChatStoryGroup] {
+        storyGroups.values.filter { group in
+            chats[group.id].map { AppLock.shared.visible($0) } == true && AppLock.shared.canShowContent
+        }.sorted {
+            $0.order == $1.order ? $0.id > $1.id : $0.order > $1.order
+        }
+    }
+
+    private func applyActiveStories(_ active: ChatActiveStories) {
+        guard active.list == .storyListMain, active.order != 0, !active.stories.isEmpty else {
+            storyGroups[active.chatId] = nil
+            return
+        }
+        storyGroups[active.chatId] = ChatStoryGroup(
+            id: active.chatId, order: active.order,
+            references: active.stories.map { StoryReference(chatId: active.chatId, storyId: $0.storyId) },
+            maxReadStoryId: active.maxReadStoryId)
+    }
+
+    func loadMoreStories() async {
+        guard let client, !storiesLoading, !storiesLoadedAll else { return }
+        storiesLoading = true
+        storiesError = nil
+        defer { storiesLoading = false }
+        do {
+            _ = try await client.loadActiveStories(storyList: .storyListMain)
+        } catch {
+            if let error = error as? TDLibKit.Error, error.code == 404 {
+                storiesLoadedAll = true
+            } else { storiesError = Self.describe(error) }
+        }
+    }
+
+    func story(_ reference: StoryReference) async throws -> StoryItem {
+        guard let client else { throw URLError(.notConnectedToInternet) }
+        let story = try await client.getStory(onlyLocal: false, storyId: reference.storyId,
+                                               storyPosterChatId: reference.chatId)
+        let content: StoryItem.Content
+        switch story.content {
+        case .storyContentPhoto(let photo):
+            content = TDConvert.largestPhoto(photo.photo).map { .photo($0) } ?? .unsupported
+        case .storyContentVideo(let video):
+            let v = video.alternativeVideo ?? video.video
+            content = .video(VideoItem(thumb: ThumbRef(mini: v.minithumbnail, thumb: v.thumbnail),
+                                       file: FileRef(v.video), width: v.width, height: v.height,
+                                       duration: Int(v.duration.rounded(.up)), fileName: "story.mp4"))
+        default: content = .unsupported
+        }
+        return StoryItem(reference: reference, caption: RichText(story.caption), content: content)
+    }
+
+    /// Opening a story sends a view receipt; respect AyuGram's read-packet setting.
+    func openStory(_ reference: StoryReference) async -> Bool {
+        guard PrivacyPreferences.shared.sendsRead(reference.chatId), AppLock.shared.canShowContent, let client else { return false }
+        do {
+            _ = try await client.openStory(storyId: reference.storyId, storyPosterChatId: reference.chatId)
+            return true
+        } catch { return false }
+    }
+
+    func closeStory(_ reference: StoryReference) async {
+        _ = try? await client?.closeStory(storyId: reference.storyId, storyPosterChatId: reference.chatId)
+    }
 
     private func startDownload(fileId: Int, priority: Int) {
         guard let client else { return }

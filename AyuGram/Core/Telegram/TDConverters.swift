@@ -134,6 +134,7 @@ enum TDConvert {
         if let f = m.forwardInfo {
             item.forwardedFrom = forwardName(f.origin, names: names)
         }
+        item.inlineKeyboard = inlineKeyboard(m.replyMarkup)
         item.authorSignature = m.authorSignature
         item.viaBotUserId = m.viaBotUserId
         item.mediaAlbumId = m.mediaAlbumId.rawValue
@@ -153,6 +154,33 @@ enum TDConvert {
         if m.schedulingState != nil { item.isScheduled = true }
         if case .messageTopicForum(let t)? = m.topicId { item.topicId = Int64(t.forumTopicId) }
         return item
+    }
+
+    static func inlineKeyboard(_ markup: ReplyMarkup?) -> [[BotButtonItem]]? {
+        guard case .replyMarkupInlineKeyboard(let keyboard)? = markup else { return nil }
+        return keyboard.rows.map { row in
+            row.map { button in
+                let action: BotButtonItem.Action
+                switch button.type {
+                case .inlineKeyboardButtonTypeUrl(let value): action = .url(value.url)
+                case .inlineKeyboardButtonTypeCallback(let value): action = .callback(value.data)
+                case .inlineKeyboardButtonTypeCopyText(let value): action = .copy(value.text)
+                case .inlineKeyboardButtonTypeUser(let value): action = .user(value.userId)
+                default: action = .unsupported
+                }
+                return BotButtonItem(text: button.text, action: action)
+            }
+        }
+    }
+
+    static func replyKeyboard(_ message: Message) -> BotReplyKeyboard? {
+        guard case .replyMarkupShowKeyboard(let keyboard)? = message.replyMarkup else { return nil }
+        let rows = keyboard.rows.map { row in
+            row.map { button in
+                BotButtonItem(text: button.text, action: button.type == .keyboardButtonTypeText ? .text : .unsupported)
+            }
+        }
+        return BotReplyKeyboard(messageId: message.id, rows: rows, oneTime: keyboard.oneTime, forceReply: keyboard.forceReply)
     }
 
     static func reactions(_ info: MessageInteractionInfo?) -> [ReactionItem] {
@@ -224,12 +252,7 @@ enum TDConvert {
             return .contact(name: "\(c.contact.firstName) \(c.contact.lastName)".trimmingCharacters(in: .whitespaces),
                             phone: c.contact.phoneNumber)
         case .messagePoll(let p):
-            let poll = p.poll
-            var isQuiz = false
-            if case .pollTypeQuiz = poll.type { isQuiz = true }
-            return .poll(PollItem(question: poll.question.text,
-                                  options: poll.options.map { .init(text: $0.text.text, votePercentage: $0.votePercentage, isChosen: $0.isChosen) },
-                                  totalVoters: poll.totalVoterCount, isQuiz: isQuiz, isClosed: poll.isClosed))
+            return .poll(poll(p.poll))
         case .messageAnimatedEmoji(let e):
             return .animatedEmoji(e.emoji)
         case .messageDice(let d):
@@ -280,6 +303,16 @@ enum TDConvert {
     static func video(_ v: Video) -> VideoItem {
         VideoItem(thumb: ThumbRef(mini: v.minithumbnail, thumb: v.thumbnail), file: FileRef(v.video),
                   width: v.width, height: v.height, duration: v.duration, fileName: v.fileName)
+    }
+
+    static func poll(_ value: Poll) -> PollItem {
+        var isQuiz = false
+        if case .pollTypeQuiz = value.type { isQuiz = true }
+        return PollItem(question: value.question.text,
+            options: value.options.map { .init(text: $0.text.text, votePercentage: $0.votePercentage, isChosen: $0.isChosen) },
+            totalVoters: value.totalVoterCount, isQuiz: isQuiz, isClosed: value.isClosed,
+            allowsMultipleAnswers: value.allowsMultipleAnswers, canVote: value.voteRestrictionReason == nil,
+            pollId: value.id.rawValue, canSeeResults: value.canSeeResults)
     }
 
     static func sticker(_ s: Sticker) -> StickerItem {

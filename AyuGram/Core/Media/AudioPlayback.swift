@@ -33,7 +33,10 @@ final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
         Task {
             do {
                 let url: URL
-                if isVoice || path.lowercased().hasSuffix(".ogg") || path.lowercased().hasSuffix(".oga") {
+                let header = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path))
+                let magic = try? header?.read(upToCount: 4)
+                try? header?.close()
+                if magic == Data("OggS".utf8) {
                     url = try await Task.detached(priority: .userInitiated) {
                         try OpusOggDecoder.wavFile(for: URL(fileURLWithPath: path), cacheKey: key)
                     }.value

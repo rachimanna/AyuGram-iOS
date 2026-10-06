@@ -18,6 +18,9 @@ struct ChatListView: View {
         NavigationStack(path: $router.chatPath) {
             List {
                 if model.searchQuery.isEmpty {
+                    if model.selectedList == .main {
+                        StoriesStrip().listRowInsets(EdgeInsets()).listRowSeparator(.hidden)
+                    }
                     NavigationLink(L("DeletedFolder")) { UnifiedHistoryView() }
                     if model.tabs.count > 1 {
                         FolderTabs(tabs: model.tabs, selected: model.selectedList) { model.select($0) }
@@ -84,6 +87,7 @@ struct ChatListView: View {
                 }
             }
             .task { await model.onAppear() }
+            .task { await service.loadMoreStories() }
             .sheet(isPresented: $showVaultUnlock) { PINUnlockView(vault: true) { showVaultUnlock = false } }
             .confirmationDialog(L("KillAppConfirm"), isPresented: $showKillConfirm, titleVisibility: .visible) {
                 Button(L("KillApp"), role: .destructive) { AppKiller.kill() }

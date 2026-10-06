@@ -115,6 +115,9 @@ struct MessageBubble: View {
                     .padding(.horizontal, isMediaOnly ? 6 : 0)
             }
             MessageContentView(message: message, isOutgoing: message.isOutgoing, onMedia: onMedia)
+            if message.inlineKeyboard?.isEmpty == false {
+                BotInlineKeyboardView(message: message)
+            }
             if !message.reactions.isEmpty {
                 ReactionsView(reactions: message.reactions, isOutgoing: message.isOutgoing)
                     .padding(.horizontal, isMediaOnly ? 6 : 0)

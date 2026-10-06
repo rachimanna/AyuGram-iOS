@@ -16,6 +16,9 @@ struct ChatView: View {
     @State private var forwardFor: MessageItem?
     @State private var deleteFor: MessageItem?
     @State private var detailsFor: MessageItem?
+    @State private var showMessageSearch = false
+    @State private var showScheduled = false
+    @State private var scrollTarget: Int64?
     @State private var mediaViewer: MediaViewerItem?
 
     init(chatId: Int64) {
@@ -45,6 +48,10 @@ struct ChatView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button { showMessageSearch = true } label: { Label(L("SearchInChat"), systemImage: "magnifyingglass") }
+                    if model.canSchedule {
+                        Button { showScheduled = true } label: { Label(L("ScheduledMessages"), systemImage: "clock") }
+                    }
                     NavigationLink(L("ChatPrivacy")) { ChatPrivacyView(chatId: chatId) }
                     NavigationLink(value: Route.deletedMessages(chatId: chatId)) {
                         Label(L("DeletedMessages"), systemImage: "trash.slash")
@@ -67,6 +74,14 @@ struct ChatView: View {
         }
         .task { await model.onAppear() }
         .onDisappear { Task { await model.onDisappear() } }
+        .sheet(isPresented: $showMessageSearch) {
+            ChatMessageBrowser(chatId: chatId) { message in
+                Task { await model.reveal(message); scrollTarget = message.id }
+            }
+        }
+        .sheet(isPresented: $showScheduled) {
+            ChatMessageBrowser(chatId: chatId, scheduled: true) { _ in }
+        }
         .sheet(item: $historyFor) { m in EditsHistoryView(message: m, model: model) }
         .sheet(item: $forwardFor) { m in
             ChatPickerView(title: L("ForwardTo")) { target in
@@ -97,24 +112,26 @@ struct ChatView: View {
     // MARK: - List
 
     private var messageList: some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(model.rows) { row in
-                    rowView(row)
-                        .scaleEffect(x: 1, y: -1)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(model.rows) { row in
+                        rowView(row).scaleEffect(x: 1, y: -1)
+                    }
+                    if !model.reachedOldest {
+                        ProgressView().padding().scaleEffect(x: 1, y: -1).task { await model.loadOlder() }
+                    }
                 }
-                if !model.reachedOldest {
-                    ProgressView()
-                        .padding()
-                        .scaleEffect(x: 1, y: -1)
-                        .task { await model.loadOlder() }
-                }
+                .padding(.horizontal, 8).padding(.vertical, 6)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .scaleEffect(x: 1, y: -1)
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: scrollTarget) { _, target in
+                guard let target else { return }
+                withAnimation { proxy.scrollTo(model.rowID(for: target), anchor: .center) }
+                scrollTarget = nil
+            }
         }
-        .scaleEffect(x: 1, y: -1)
-        .scrollDismissesKeyboard(.interactively)
     }
 
     @ViewBuilder
@@ -154,11 +171,21 @@ struct ChatView: View {
         if !m.body.plainText.isEmpty {
             Button { UIPasteboard.general.string = m.body.plainText } label: { Label(L("Copy"), systemImage: "doc.on.doc") }
         }
-        if model.canEdit(m), case .text = m.body {
+        if model.canEdit(m) {
             Button { model.startEdit(m) } label: { Label(L("Edit"), systemImage: "pencil") }
         }
         if !m.ayuDeleted && chat?.hasProtectedContent != true && !m.body.isService {
             Button { forwardFor = m } label: { Label(L("Forward"), systemImage: "arrowshape.turn.up.right") }
+        }
+        if !m.ayuDeleted && !m.body.isService && m.sendingState == .sent {
+            Menu(L("React")) {
+                ForEach(["👍", "❤️", "😂", "🔥", "😢", "👎"], id: \.self) { emoji in
+                    Button(emoji) { Task { await model.react(m, emoji: emoji) } }
+                }
+            }
+            Button { Task { await model.pin(m) } } label: {
+                Label(L(m.isPinned ? "UnpinMessage" : "PinMessage"), systemImage: m.isPinned ? "pin.slash" : "pin")
+            }
         }
         // --- AyuGram: OPTION_HISTORY
         if m.ayuHasRevisions {
