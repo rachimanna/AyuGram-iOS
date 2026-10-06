@@ -338,9 +338,6 @@ final class ChatViewModel: ChatEventSink {
     }
 
     func sendPhoto(data: Data) async {
-        guard !isSending else { return }
-        isSending = true
-        defer { isSending = false }
         guard let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.9) else {
             errorText = L("ErrorOccurred")
             return
@@ -360,9 +357,6 @@ final class ChatViewModel: ChatEventSink {
     }
 
     func sendFile(url source: URL) async {
-        guard !isSending else { return }
-        isSending = true
-        defer { isSending = false }
         let access = source.startAccessingSecurityScopedResource()
         defer { if access { source.stopAccessingSecurityScopedResource() } }
         let dir = Self.outgoingDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
