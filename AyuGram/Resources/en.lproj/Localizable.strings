@@ -464,3 +464,5 @@
 "VoiceSend" = "Send voice message";
 "VoiceMicrophoneDenied" = "Allow microphone access in iOS Settings to record voice messages.";
 "VoiceSendFailed" = "Sending failed. Your recording is kept; you can retry.";
+
+"CannotWriteToChat" = "You cannot send messages to this chat.";

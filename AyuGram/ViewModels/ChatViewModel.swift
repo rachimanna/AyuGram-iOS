@@ -357,8 +357,22 @@ final class ChatViewModel: ChatEventSink {
         mode = .normal
     }
 
+    /// Every rejected send reports its reason without touching the user's draft or reply.
+    private func canBeginSending() -> Bool {
+        guard !isSending else { return false }
+        guard service.authStep == .ready else {
+            errorText = TelegramService.describe(TelegramServiceError.notReady)
+            return false
+        }
+        guard canWrite else {
+            errorText = L("CannotWriteToChat")
+            return false
+        }
+        return true
+    }
+
     func send(delivery: MessageDelivery = MessageDelivery()) async {
-        guard !isSending, canWrite else { return }
+        guard canBeginSending() else { return }
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
             if case .edit(let message) = mode, case .text = message.body { return }
@@ -398,7 +412,7 @@ final class ChatViewModel: ChatEventSink {
     }
 
     func sendPhoto(data: Data) async {
-        guard !isSending, canWrite else { return }
+        guard canBeginSending() else { return }
         isSending = true
         defer { isSending = false }
         guard let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.9) else {
@@ -420,7 +434,7 @@ final class ChatViewModel: ChatEventSink {
     }
 
     func sendFile(url source: URL) async {
-        guard !isSending, canWrite else { return }
+        guard canBeginSending() else { return }
         isSending = true
         defer { isSending = false }
         let access = source.startAccessingSecurityScopedResource()
@@ -446,7 +460,7 @@ final class ChatViewModel: ChatEventSink {
     }
 
     func sendBotText(_ text: String, keyboard: BotReplyKeyboard) async {
-        guard !isSending, canWrite else { return }
+        guard canBeginSending() else { return }
         isSending = true
         defer { isSending = false }
         do {
@@ -459,7 +473,7 @@ final class ChatViewModel: ChatEventSink {
 
     @discardableResult
     func sendVoice(url: URL, duration: Int) async -> Bool {
-        guard !isSending, canWrite else { return false }
+        guard canBeginSending() else { return false }
         let current = mode
         isSending = true
         defer { isSending = false }
@@ -472,7 +486,7 @@ final class ChatViewModel: ChatEventSink {
     }
 
     func sendVideo(url: URL) async {
-        guard !isSending, canWrite else { return }
+        guard canBeginSending() else { return }
         let current = mode
         isSending = true
         defer { isSending = false; try? FileManager.default.removeItem(at: url) }
@@ -492,7 +506,7 @@ final class ChatViewModel: ChatEventSink {
 
     @discardableResult
     func sendPoll(_ draft: PollDraft) async -> Bool {
-        guard !isSending, canWrite else { return false }
+        guard canBeginSending() else { return false }
         let current = mode
         isSending = true
         defer { isSending = false }
@@ -506,7 +520,7 @@ final class ChatViewModel: ChatEventSink {
 
     @discardableResult
     func sendSticker(_ sticker: StickerItem) async -> Bool {
-        guard !isSending, canWrite else { return false }
+        guard canBeginSending() else { return false }
         let current = mode
         isSending = true
         defer { isSending = false }
