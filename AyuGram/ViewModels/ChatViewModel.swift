@@ -43,6 +43,7 @@ final class ChatViewModel: ChatEventSink {
     private(set) var errorText: String?
     var composerText: String = "" { didSet { onComposerChanged(oldValue) } }
     var mode: ComposerMode = .normal
+    private(set) var isSending = false
     var hiddenByFilterCount = 0
 
     @ObservationIgnored private let service = TelegramService.shared
@@ -75,6 +76,20 @@ final class ChatViewModel: ChatEventSink {
         }
     }
 
+    var canSendPoll: Bool {
+        switch chat?.kind {
+        case .basicGroup, .supergroup, .channel, .bot, .savedMessages: return canWrite
+        default: return false
+        }
+    }
+
+    var canSchedule: Bool {
+        if case .secret = chat?.kind { return false }
+        return canWrite
+    }
+
+    func reportError(_ error: Swift.Error) { errorText = TelegramService.describe(error) }
+
     // MARK: - Lifecycle
 
     func onAppear() async {
@@ -89,7 +104,7 @@ final class ChatViewModel: ChatEventSink {
     func onDisappear() async {
         service.unsubscribe(chatId: chatId, self)
         viewFlushTask?.cancel()
-        flushViews()
+        pendingViews = []
         await service.saveDraft(chatId: chatId, text: composerText)
         await service.closeChat(chatId)
         didOpen = false
@@ -224,6 +239,15 @@ final class ChatViewModel: ChatEventSink {
         case .sendFailed(let oldId, let m):
             messages.removeAll { $0.id == oldId }
             merge([m])
+        case .replyMarkupChanged(let id, let rows):
+            update(id) { $0.inlineKeyboard = rows }
+        case .pollChanged(let id, let poll):
+            for index in messages.indices {
+                if case .poll(let current) = messages[index].body, current.pollId == id {
+                    messages[index].body = .poll(poll)
+                }
+            }
+            rebuildRows()
         case .contentChanged(let id, let body):
             update(id) { $0.body = body }
         case .edited(let id, let editDate):
@@ -262,6 +286,8 @@ final class ChatViewModel: ChatEventSink {
     // MARK: - Viewing (read packets)
 
     func messageAppeared(_ m: MessageItem) {
+        service.setMessageDisplayed(chatId: chatId, messageId: m.id, displayed: true)
+        service.preserveViewed(m)
         guard !m.isOutgoing, !m.ayuDeleted, m.id > 0 else { return }
         pendingViews.insert(m.id)
         viewFlushTask?.cancel()
@@ -270,6 +296,10 @@ final class ChatViewModel: ChatEventSink {
             guard !Task.isCancelled else { return }
             self?.flushViews()
         }
+    }
+
+    func messageDisappeared(_ m: MessageItem) {
+        service.setMessageDisplayed(chatId: chatId, messageId: m.id, displayed: false)
     }
 
     private func flushViews() {
@@ -286,6 +316,25 @@ final class ChatViewModel: ChatEventSink {
 
     func isRead(_ m: MessageItem) -> Bool {
         m.isOutgoing && (chat?.lastReadOutboxMessageId ?? 0) >= m.id
+    }
+
+    func reveal(_ message: MessageItem) async {
+        guard !message.isScheduled else { return }
+        do {
+            let around = try await service.history(chatId: chatId, from: message.id, offset: -15, limit: 40)
+            merge(around + [message])
+        } catch { errorText = TelegramService.describe(error) }
+    }
+
+    func rowID(for messageId: Int64) -> String {
+        for row in rows {
+            switch row {
+            case .message(let m) where m.id == messageId: return row.id
+            case .album(let items) where items.contains(where: { $0.id == messageId }): return row.id
+            default: continue
+            }
+        }
+        return "m\(messageId)"
     }
 
     // MARK: - Composer
@@ -308,41 +357,76 @@ final class ChatViewModel: ChatEventSink {
         mode = .normal
     }
 
-    func send() async {
+    /// Every rejected send reports its reason without touching the user's draft or reply.
+    private func canBeginSending() -> Bool {
+        guard !isSending else { return false }
+        guard service.authStep == .ready else {
+            errorText = TelegramService.describe(TelegramServiceError.notReady)
+            return false
+        }
+        guard canWrite else {
+            errorText = L("CannotWriteToChat")
+            return false
+        }
+        return true
+    }
+
+    func send(delivery: MessageDelivery = MessageDelivery()) async {
+        guard canBeginSending() else { return }
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        if text.isEmpty {
+            if case .edit(let message) = mode, case .text = message.body { return }
+            else if case .edit = mode {} else { return }
+        }
+        if let date = delivery.scheduledDate, date.timeIntervalSinceNow < 15 {
+            errorText = L("ScheduleTooSoon"); return
+        }
+        let originalText = composerText
         let current = mode
-        composerText = ""
-        mode = .normal
+        isSending = true
+        defer { isSending = false }
         do {
             switch current {
             case .edit(let m):
-                try await service.editText(chatId: chatId, messageId: m.id, text: RichText(text: text))
+                let original = m.body.richText
+                let rich = original?.text == text ? original! : RichText(text: text)
+                if case .text = m.body {
+                    try await service.editText(chatId: chatId, messageId: m.id, text: rich)
+                } else {
+                    try await service.editCaption(chatId: chatId, messageId: m.id, text: rich)
+                }
             case .reply(let m):
-                try await service.sendText(chatId: chatId, text: RichText(text: text), replyToMessageId: m.id)
+                try await service.sendText(chatId: chatId, text: RichText(text: text), replyToMessageId: m.id, delivery: delivery)
             case .normal:
-                try await service.sendText(chatId: chatId, text: RichText(text: text), replyToMessageId: nil)
+                try await service.sendText(chatId: chatId, text: RichText(text: text), replyToMessageId: nil, delivery: delivery)
             }
-            notifyIfScheduled()
+            // Only clear the submitted draft, never a draft changed during the request.
+            if composerText == originalText && mode == current {
+                composerText = ""
+                mode = .normal
+            }
+            if case .edit = current {} else if delivery.scheduledDate != nil { infoText = L("SentAsScheduled") } else { notifyIfScheduled() }
         } catch {
             errorText = TelegramService.describe(error)
-            composerText = text
-            mode = current
         }
     }
 
     func sendPhoto(data: Data) async {
+        guard canBeginSending() else { return }
+        isSending = true
+        defer { isSending = false }
         guard let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.9) else {
             errorText = L("ErrorOccurred")
             return
         }
         let url = Self.outgoingDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        let current = mode
         do {
             try jpeg.write(to: url)
             let replyId: Int64? = { if case .reply(let m) = mode { return m.id }; return nil }()
-            mode = .normal
             try await service.sendPhoto(chatId: chatId, path: url.path, width: Int(image.size.width * image.scale),
                                         height: Int(image.size.height * image.scale), caption: "", replyToMessageId: replyId)
+            if mode == current { mode = .normal }
             notifyIfScheduled()
         } catch {
             errorText = TelegramService.describe(error)
@@ -350,20 +434,112 @@ final class ChatViewModel: ChatEventSink {
     }
 
     func sendFile(url source: URL) async {
+        guard canBeginSending() else { return }
+        isSending = true
+        defer { isSending = false }
         let access = source.startAccessingSecurityScopedResource()
         defer { if access { source.stopAccessingSecurityScopedResource() } }
         let dir = Self.outgoingDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let target = dir.appendingPathComponent(source.lastPathComponent)
+        let current = mode
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try FileManager.default.copyItem(at: source, to: target)
             let replyId: Int64? = { if case .reply(let m) = mode { return m.id }; return nil }()
-            mode = .normal
             try await service.sendDocument(chatId: chatId, path: target.path, caption: "", replyToMessageId: replyId)
+            if mode == current { mode = .normal }
             notifyIfScheduled()
         } catch {
             errorText = TelegramService.describe(error)
         }
+    }
+
+    private var replyId: Int64? {
+        if case .reply(let message) = mode { return message.id }
+        return nil
+    }
+
+    func sendBotText(_ text: String, keyboard: BotReplyKeyboard) async {
+        guard canBeginSending() else { return }
+        isSending = true
+        defer { isSending = false }
+        do {
+            try await service.sendText(chatId: chatId, text: RichText(text: text),
+                replyToMessageId: keyboard.forceReply ? keyboard.messageId : replyId)
+            if keyboard.oneTime { service.botKeyboards[chatId] = nil }
+            notifyIfScheduled()
+        } catch { errorText = TelegramService.describe(error) }
+    }
+
+    @discardableResult
+    func sendVoice(url: URL, duration: Int) async -> Bool {
+        guard canBeginSending() else { return false }
+        let current = mode
+        isSending = true
+        defer { isSending = false }
+        do {
+            try await service.sendVoice(chatId: chatId, path: url.path, duration: duration, replyToMessageId: replyId)
+            if mode == current { mode = .normal }
+            notifyIfScheduled()
+            return true
+        } catch { errorText = TelegramService.describe(error); return false }
+    }
+
+    func sendVideo(url: URL) async {
+        guard canBeginSending() else { return }
+        let current = mode
+        isSending = true
+        defer { isSending = false; try? FileManager.default.removeItem(at: url) }
+        do {
+            let video = try await OutgoingVideo.prepare(url)
+            do {
+                try await service.sendVideo(chatId: chatId, path: video.url.path, width: video.width, height: video.height,
+                                             duration: video.duration, replyToMessageId: replyId)
+            } catch {
+                try? FileManager.default.removeItem(at: video.url)
+                throw error
+            }
+            if mode == current { mode = .normal }
+            notifyIfScheduled()
+        } catch { errorText = TelegramService.describe(error) }
+    }
+
+    @discardableResult
+    func sendPoll(_ draft: PollDraft) async -> Bool {
+        guard canBeginSending() else { return false }
+        let current = mode
+        isSending = true
+        defer { isSending = false }
+        do {
+            try await service.sendPoll(chatId: chatId, draft: draft, replyToMessageId: replyId)
+            if mode == current { mode = .normal }
+            notifyIfScheduled()
+            return true
+        } catch { errorText = TelegramService.describe(error); return false }
+    }
+
+    @discardableResult
+    func sendSticker(_ sticker: StickerItem) async -> Bool {
+        guard canBeginSending() else { return false }
+        let current = mode
+        isSending = true
+        defer { isSending = false }
+        do {
+            try await service.sendSticker(chatId: chatId, sticker: sticker, replyToMessageId: replyId)
+            if mode == current { mode = .normal }
+            notifyIfScheduled()
+            return true
+        } catch { errorText = TelegramService.describe(error); return false }
+    }
+
+    func react(_ message: MessageItem, emoji: String) async {
+        do { try await service.toggleReaction(message, emoji: emoji) }
+        catch { errorText = TelegramService.describe(error) }
+    }
+
+    func pin(_ message: MessageItem) async {
+        do { try await service.pinMessage(message) }
+        catch { errorText = TelegramService.describe(error) }
     }
 
     private func notifyIfScheduled() {
@@ -374,7 +550,7 @@ final class ChatViewModel: ChatEventSink {
 
     func clearError() { errorText = nil; infoText = nil }
 
-    static var outgoingDirectory: URL {
+    nonisolated static var outgoingDirectory: URL {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("outgoing", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir

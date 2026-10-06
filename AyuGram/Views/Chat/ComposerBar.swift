@@ -10,6 +10,10 @@ struct ComposerBar: View {
     @Environment(AyuConfig.self) private var ayu
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
+    @State private var showVoice = false
+    @State private var showPoll = false
+    @State private var showSchedule = false
+    @State private var showStickers = false
     @State private var photoItems: [PhotosPickerItem] = []
     @FocusState private var focused: Bool
 
@@ -32,23 +36,37 @@ struct ComposerBar: View {
             }
             if model.canWrite {
                 inputRow
+                    .disabled(model.isSending)
+                if let keyboard = service.botKeyboards[model.chatId], !isEditing {
+                    BotReplyKeyboardView(model: model, keyboard: keyboard)
+                }
             } else {
                 readOnlyRow
             }
         }
         .background(.bar)
-        .photosPicker(isPresented: $showPhotoPicker, selection: $photoItems, maxSelectionCount: 10, matching: .images)
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoItems, maxSelectionCount: 10, matching: .any(of: [.images, .videos]))
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             photoItems = []
             Task {
                 for item in items {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        await model.sendPhoto(data: data)
-                    }
+                    do {
+                        if item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) }) {
+                            if let video = try await item.loadTransferable(type: ImportedVideo.self) {
+                                await model.sendVideo(url: video.url)
+                            }
+                        } else if let data = try await item.loadTransferable(type: Data.self) {
+                            await model.sendPhoto(data: data)
+                        }
+                    } catch { model.reportError(error) }
                 }
             }
         }
+        .sheet(isPresented: $showVoice) { VoiceRecordingView(model: model) }
+        .sheet(isPresented: $showPoll) { PollComposerView(model: model) }
+        .sheet(isPresented: $showSchedule) { ScheduleMessageView(model: model) }
+        .sheet(isPresented: $showStickers) { StickerPickerView(model: model) }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             guard case .success(let urls) = result else { return }
             Task { for url in urls { await model.sendFile(url: url) } }
@@ -58,14 +76,20 @@ struct ComposerBar: View {
     private var inputRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Menu {
-                Button { showPhotoPicker = true } label: { Label(L("AttachPhoto"), systemImage: "photo") }
+                Button { showPhotoPicker = true } label: { Label(L("AttachMedia"), systemImage: "photo.on.rectangle") }
                 Button { showFileImporter = true } label: { Label(L("AttachDocument"), systemImage: "doc") }
+                Button { showVoice = true } label: { Label(L("VoiceMessage"), systemImage: "mic") }
+                Button { showStickers = true } label: { Label(L("Stickers"), systemImage: "face.smiling") }
+                if model.canSendPoll {
+                    Button { showPoll = true } label: { Label(L("CreatePoll"), systemImage: "chart.bar") }
+                }
             } label: {
                 Image(systemName: "paperclip")
                     .font(.system(size: 22))
                     .foregroundStyle(.secondary)
                     .frame(width: 36, height: 36)
             }
+            .disabled(isEditing)
             TextField(L("TypeMessage"), text: $model.composerText, axis: .vertical)
                 .lineLimit(1...6)
                 .focused($focused)
@@ -76,7 +100,9 @@ struct ComposerBar: View {
                 Task { await model.send() }
             } label: {
                 ZStack(alignment: .bottomTrailing) {
+                    if model.isSending { ProgressView() }
                     Image(systemName: isEditing ? "checkmark.circle.fill" : "arrow.up.circle.fill")
+                        .opacity(model.isSending ? 0 : 1)
                         .font(.system(size: 32))
                         .foregroundStyle(canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                     // AyuGram "Schedule messages": every message is sent as a 12-second scheduled message.
@@ -89,6 +115,16 @@ struct ComposerBar: View {
                 }
             }
             .disabled(!canSend)
+            .contextMenu {
+                if !isEditing {
+                    Button { Task { await model.send(delivery: MessageDelivery(silent: true)) } } label: {
+                        Label(L("SendSilently"), systemImage: "bell.slash")
+                    }
+                    if model.canSchedule {
+                        Button { showSchedule = true } label: { Label(L("ScheduleMessage"), systemImage: "clock") }
+                    }
+                }
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -122,7 +158,8 @@ struct ComposerBar: View {
     }
 
     private var canSend: Bool {
-        !model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if isEditing, case .edit(let message) = model.mode, case .text = message.body {} else if isEditing { return true }
+        return !model.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var bannerInfo: (icon: String, title: String, text: String)? {

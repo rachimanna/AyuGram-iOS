@@ -77,6 +77,7 @@ struct MessageBubble: View {
 
     @Environment(TelegramService.self) private var service
     @Environment(AppearanceSettings.self) private var appearance
+    @Environment(AyuConfig.self) private var ayu
 
     private var isBare: Bool {
         switch message.body {
@@ -114,6 +115,9 @@ struct MessageBubble: View {
                     .padding(.horizontal, isMediaOnly ? 6 : 0)
             }
             MessageContentView(message: message, isOutgoing: message.isOutgoing, onMedia: onMedia)
+            if message.inlineKeyboard?.isEmpty == false {
+                BotInlineKeyboardView(message: message)
+            }
             if !message.reactions.isEmpty {
                 ReactionsView(reactions: message.reactions, isOutgoing: message.isOutgoing)
                     .padding(.horizontal, isMediaOnly ? 6 : 0)
@@ -129,7 +133,7 @@ struct MessageBubble: View {
         .background {
             if !isBare {
                 RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .fill(message.isOutgoing ? AnyShapeStyle(appearance.accent.gradient) : AnyShapeStyle(Theme.incomingBubble))
+                    .fill(message.isOutgoing ? appearance.outgoingStyle(localPremium: ayu.localPremium) : AnyShapeStyle(Theme.incomingBubble))
             }
         }
         .overlay {
@@ -281,6 +285,7 @@ struct AlbumRow: View {
     let onMedia: (MediaViewerItem) -> Void
 
     @Environment(AppearanceSettings.self) private var appearance
+    @Environment(AyuConfig.self) private var ayu
 
     private var isOutgoing: Bool { messages.first?.isOutgoing ?? false }
 
@@ -305,7 +310,7 @@ struct AlbumRow: View {
                     MessageFooter(message: last, isRead: isRead, onMedia: true).padding(6)
                 }
             }
-            .background(isOutgoing ? AnyShapeStyle(appearance.accent.gradient) : AnyShapeStyle(Theme.incomingBubble))
+            .background(isOutgoing ? appearance.outgoingStyle(localPremium: ayu.localPremium) : AnyShapeStyle(Theme.incomingBubble))
             .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
             .foregroundStyle(isOutgoing ? Color.white : Color.primary)
             .overlay {

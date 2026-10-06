@@ -18,17 +18,32 @@ struct AyuGramApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            Group {
+                if !AppLock.shared.appUnlocked { PINUnlockView() }
+                else if AppLock.shared.decoy { DecoyView() }
+                else { RootView() }
+            }
+                .transaction { transaction in
+                    if !appearance.animationsEnabled { transaction.animation = nil; transaction.disablesAnimations = true }
+                }
+                .alert(L("SecretScreenshotDetected"), isPresented: Binding(get: { CaptureGuard.shared.screenshotNotice }, set: { CaptureGuard.shared.screenshotNotice = $0 })) {
+                    Button("OK") { CaptureGuard.shared.screenshotNotice = false }
+                } message: { Text(L("SecretCaptureHint")) }
+                .onChange(of: router.chatPath) { _, _ in CaptureGuard.shared.refresh() }
+                .onChange(of: PrivacyPreferences.shared.snapshot.shieldSecretCapture) { _, _ in CaptureGuard.shared.refresh() }
                 .environment(service)
                 .environment(appearance)
                 .environment(router)
                 .environment(AyuConfig.shared)
                 .tint(appearance.accent)
                 .preferredColorScheme(appearance.colorScheme)
-                .task { service.start() }
+                .task { CaptureGuard.shared.start(); service.start() }
         }
         .onChange(of: scenePhase) { _, phase in
-            service.setAppActive(phase == .active)
+            AppLock.shared.phaseChanged(phase)
+            CaptureGuard.shared.refresh()
+            service.setAppActive(phase == .active && AppLock.shared.canShowContent)
+            if phase == .active { Task { await LocalAutomation.shared.runDue() } }
             if phase == .background { NotificationService.scheduleBackgroundRefresh() }
         }
     }
@@ -49,7 +64,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [] // the app is in the foreground — the chat list already shows the message
+        let allow = await MainActor.run { !AppLock.shared.decoy && !AppLock.shared.curtain }
+        return notification.request.content.userInfo["historyChange"] as? Bool == true && allow ? [.banner, .sound] : []
     }
 }
 
@@ -80,10 +96,10 @@ extension View {
     func withAppRoutes() -> some View {
         navigationDestination(for: Route.self) { route in
             switch route {
-            case .chat(let id): ChatView(chatId: id)
+            case .chat(let id): ChatAccessGate(chatId: id) { ChatView(chatId: id) }
             case .archive: ArchiveView()
-            case .profile(let id): ProfileView(chatId: id)
-            case .deletedMessages(let id): DeletedMessagesView(chatId: id)
+            case .profile(let id): ChatAccessGate(chatId: id) { ProfileView(chatId: id) }
+            case .deletedMessages(let id): ChatAccessGate(chatId: id) { DeletedMessagesView(chatId: id) }
             }
         }
     }

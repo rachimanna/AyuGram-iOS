@@ -99,6 +99,10 @@ struct PollItem: Codable, Hashable {
     var totalVoters: Int
     var isQuiz: Bool
     var isClosed: Bool
+    var allowsMultipleAnswers: Bool? = nil
+    var canVote: Bool? = nil
+    var pollId: Int64? = nil
+    var canSeeResults: Bool? = nil
 }
 
 enum MessageBody: Codable, Hashable {
@@ -251,6 +255,7 @@ struct MessageItem: Codable, Identifiable, Hashable {
     var topicId: Int64 = 0
     var selfDestructIn: Double = 0
     var isScheduled: Bool = false
+    var inlineKeyboard: [[BotButtonItem]]? = nil
 
     // MARK: AyuGram state (not from Telegram)
     /// Message was deleted on the server, shown from the AyuGram database (🧹 mark).
@@ -262,7 +267,7 @@ struct MessageItem: Codable, Identifiable, Hashable {
 }
 
 /// A stored edit revision (EditedMessage entity).
-struct EditRevision: Identifiable, Hashable {
+struct EditRevision: Codable, Identifiable, Hashable {
     var id: Int64           // fakeId
     var message: MessageItem
     var entityCreateDate: Int

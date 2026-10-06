@@ -8,6 +8,7 @@ struct ChatRowView: View {
     var isPinned: Bool = false
 
     @Environment(TelegramService.self) private var service
+    @Environment(AppearanceSettings.self) private var appearance
 
     private var isSaved: Bool { if case .savedMessages = chat.kind { return true }; return false }
 
@@ -21,7 +22,7 @@ struct ChatRowView: View {
     var body: some View {
         let unread = chat.visibleUnreadCount(localReadUntil: LocalReadStore.shared.readUntil(chatId: chat.id))
         HStack(alignment: .center, spacing: 12) {
-            AvatarView(id: chat.id, title: title, photo: chat.photo, size: 56, colorId: chat.accentColorId, isSavedMessages: isSaved)
+            AvatarView(id: chat.id, title: title, photo: chat.photo, size: appearance.compactMode ? 42 : 56, colorId: chat.accentColorId, isSavedMessages: isSaved)
                 .overlay(alignment: .bottomTrailing) {
                     if isOnline {
                         Circle().fill(Color.green)
@@ -32,6 +33,7 @@ struct ChatRowView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     kindIcon
+                    if PrivacyPreferences.shared.isGhost(chat.id) { GhostGlyph().frame(width: 13, height: 13) }
                     Text(title).font(.system(size: 16, weight: .semibold)).lineLimit(1)
                     if chat.isVerified || isVerified { Image(systemName: "checkmark.seal.fill").font(.caption).foregroundStyle(.tint) }
                     if isPremiumUser { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.purple) }
@@ -46,13 +48,13 @@ struct ChatRowView: View {
                     previewText
                         .font(.system(size: 15))
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(appearance.compactMode ? 1 : 2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     badges(unread: unread)
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, appearance.compactMode ? 1 : 4)
     }
 
     private var isVerified: Bool {

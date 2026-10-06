@@ -10,6 +10,7 @@ struct ChatListView: View {
     @State private var model = ChatListViewModel()
     @State private var showKillConfirm = false
     @State private var deleteCandidate: ChatItem?
+    @State private var showVaultUnlock = false
 
     var body: some View {
         @Bindable var router = router
@@ -17,6 +18,10 @@ struct ChatListView: View {
         NavigationStack(path: $router.chatPath) {
             List {
                 if model.searchQuery.isEmpty {
+                    if model.selectedList == .main {
+                        StoriesStrip().listRowInsets(EdgeInsets()).listRowSeparator(.hidden)
+                    }
+                    NavigationLink(L("DeletedFolder")) { UnifiedHistoryView() }
                     if model.tabs.count > 1 {
                         FolderTabs(tabs: model.tabs, selected: model.selectedList) { model.select($0) }
                             .listRowInsets(EdgeInsets())
@@ -64,6 +69,15 @@ struct ChatListView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    if AppLock.shared.hasVaultPIN {
+                        Button {
+                            if AppLock.shared.vaultUnlocked { AppLock.shared.accountChanged() }
+                            else { showVaultUnlock = true }
+                        } label: { Image(systemName: AppLock.shared.vaultUnlocked ? "lock.open" : "lock.rectangle.stack") }
+                        .accessibilityLabel(L("UnlockHiddenChats"))
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     if ayu.showKillButtonInDrawer {
                         Button(role: .destructive) { showKillConfirm = true } label: {
                             Image(systemName: "power")
@@ -73,6 +87,8 @@ struct ChatListView: View {
                 }
             }
             .task { await model.onAppear() }
+            .task { await service.loadMoreStories() }
+            .sheet(isPresented: $showVaultUnlock) { PINUnlockView(vault: true) { showVaultUnlock = false } }
             .confirmationDialog(L("KillAppConfirm"), isPresented: $showKillConfirm, titleVisibility: .visible) {
                 Button(L("KillApp"), role: .destructive) { AppKiller.kill() }
             }
@@ -102,7 +118,12 @@ struct ChatListView: View {
             ChatRowView(chat: chat, preview: model.preview(for: chat), isPinned: pinned)
         }
         .listRowBackground(pinned ? Color.secondary.opacity(0.07) : Color.clear)
-        .swipeActions(edge: .leading) {
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button {
+                let enabled = PrivacyPreferences.shared.isGhost(chat.id)
+                PrivacyPreferences.shared.update(chat.id) { $0.ghost = enabled ? .off : .on }
+            } label: { Label(L("GhostModeTitle"), systemImage: PrivacyPreferences.shared.isGhost(chat.id) ? "eye" : "eye.slash") }
+            .tint(.purple)
             Button {
                 Task { await service.markChatUnread(chatId: chat.id, unread: !unread) }
             } label: {
@@ -116,7 +137,10 @@ struct ChatListView: View {
             }
             .tint(.green)
         }
-        .swipeActions(edge: .trailing) {
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if AppLock.shared.hasVaultPIN {
+                Button { PrivacyPreferences.shared.update(chat.id) { $0.hidden.toggle() } } label: { Label(L("HideChatBehindPIN"), systemImage: "lock") }.tint(.indigo)
+            }
             Button(role: .destructive) { deleteCandidate = chat } label: { Label(L("Delete"), systemImage: "trash") }
             Button {
                 Task { await service.setMuted(chatId: chat.id, muted: !chat.isMuted) }

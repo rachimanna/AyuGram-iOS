@@ -14,7 +14,7 @@
 import Foundation
 
 final class AyuDatabase {
-    static let schemaVersion: Int64 = 1
+    static let schemaVersion: Int64 = 2
 
     let db: SQLiteDatabase
     private let encoder = JSONEncoder()
@@ -24,14 +24,14 @@ final class AyuDatabase {
         db = try SQLiteDatabase(path: path)
         try db.execute("PRAGMA journal_mode=\(journalMode == "WAL" ? "WAL" : "DELETE");")
         try db.execute("PRAGMA synchronous=NORMAL;")
-        migrate()
+        try migrate()
     }
 
     static func defaultPath() -> String {
         AyuConstants.applicationSupport.appendingPathComponent("\(AyuConstants.ayuDatabase).sqlite").path
     }
 
-    private func migrate() {
+    private func migrate() throws {
         let version = (try? db.scalarInt("PRAGMA user_version")) ?? 0
         guard version < Self.schemaVersion else { return }
         do {
@@ -66,10 +66,18 @@ final class AyuDatabase {
                         PRIMARY KEY (userId, dialogId, messageId));
                     """)
                 try db.execute("CREATE INDEX IF NOT EXISTS idx_cache_age ON messagecache(cachedAt);")
+                try db.execute("""
+                    CREATE TABLE IF NOT EXISTS retainedmedia (
+                        userId INTEGER NOT NULL, dialogId INTEGER NOT NULL, messageId INTEGER NOT NULL,
+                        date INTEGER NOT NULL, payload BLOB NOT NULL, mediaPath TEXT NOT NULL,
+                        PRIMARY KEY (userId, dialogId, messageId));
+                    """)
+                try db.execute("CREATE INDEX IF NOT EXISTS idx_deleted_feed ON deletedmessage(userId, entityCreateDate, fakeId);")
                 try db.execute("PRAGMA user_version = \(Self.schemaVersion);")
             }
         } catch {
             AppLog.error("AyuDatabase migration failed: \(error)")
+            throw error
         }
     }
 
@@ -287,6 +295,33 @@ final class AyuDatabase {
         return result
     }
 
+    func allDeleted(userId: Int64, limit: Int, offset: Int) -> [MessageItem] {
+        readDeleted("SELECT fakeId, payload, mediaPath FROM deletedmessage WHERE userId = ? ORDER BY entityCreateDate DESC, fakeId DESC LIMIT ? OFFSET ?",
+            [.int(userId), .int(Int64(limit)), .int(Int64(offset))])
+    }
+    func allRevisions(userId: Int64) -> [EditRevision] {
+        var result: [EditRevision] = []
+        try? db.query("SELECT fakeId, payload, mediaPath, entityCreateDate FROM editedmessage WHERE userId = ? ORDER BY fakeId", [.int(userId)]) { row in
+            guard var message = self.decode(row.blob(1)) else { return }
+            if let path = row.text(2), var file = message.body.mainFile { file.localPath = path; message.body = message.body.replacingMainFile(file) }
+            result.append(EditRevision(id: row.int(0), message: message, entityCreateDate: Int(row.int(3))))
+        }
+        return result
+    }
+    func retainMedia(userId: Int64, message: MessageItem, path: String) {
+        guard let payload = encode(message) else { return }
+        _ = try? db.run("INSERT OR IGNORE INTO retainedmedia VALUES (?, ?, ?, ?, ?, ?)",
+            [.int(userId), .int(message.chatId), .int(message.id), .int(Int64(message.date)), .blob(payload), .text(path)])
+    }
+    func retainedMedia(userId: Int64) -> [MessageItem] {
+        var result: [MessageItem] = []
+        try? db.query("SELECT payload, mediaPath FROM retainedmedia WHERE userId = ? ORDER BY date DESC", [.int(userId)]) { row in
+            guard var message = self.decode(row.blob(0)), var file = message.body.mainFile else { return }
+            file.localPath = row.text(1); message.body = message.body.replacingMainFile(file); result.append(message)
+        }
+        return result
+    }
+
     // MARK: - Maintenance
 
     struct Stats {
@@ -305,7 +340,7 @@ final class AyuDatabase {
     func clean() {
         do {
             try db.transaction {
-                try db.execute("DELETE FROM deletedmessagereaction; DELETE FROM deletedmessage; DELETE FROM editedmessage; DELETE FROM messagecache;")
+                try db.execute("DELETE FROM deletedmessagereaction; DELETE FROM deletedmessage; DELETE FROM editedmessage; DELETE FROM messagecache; DELETE FROM retainedmedia;")
             }
             try db.execute("VACUUM;")
         } catch {

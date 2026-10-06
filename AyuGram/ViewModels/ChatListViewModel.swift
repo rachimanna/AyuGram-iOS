@@ -9,18 +9,19 @@ final class ChatListViewModel {
     var searchQuery: String = "" {
         didSet { scheduleSearch() }
     }
-    private(set) var searchResults: [Int64] = []
+    private var rawSearchResults: [Int64] = []
+    var searchResults: [Int64] { rawSearchResults.filter { id in service.chats[id].map(AppLock.shared.visible) ?? AppLock.shared.mayRevealUnknownChat(id) } }
     private(set) var isSearching = false
 
     @ObservationIgnored private let service = TelegramService.shared
     @ObservationIgnored private var searchTask: Task<Void, Never>?
 
-    var chatIds: [Int64] { service.sortedChatIds(in: selectedList) }
+    var chatIds: [Int64] { service.sortedChatIds(in: selectedList).filter { service.chats[$0].map(AppLock.shared.visible) ?? false } }
 
-    var archiveIds: [Int64] { service.sortedChatIds(in: .archive) }
+    var archiveIds: [Int64] { service.sortedChatIds(in: .archive).filter { service.chats[$0].map(AppLock.shared.visible) ?? false } }
 
     var tabs: [FolderTab] {
-        [FolderTab(key: .main, title: L("FilterAllChats"))] + service.folders.map { FolderTab(key: .folder($0.id), title: $0.title) }
+        [FolderTab(key: .main, title: L("FilterAllChats"))] + service.folders.filter { !PrivacyPreferences.shared.snapshot.lockedFolders.contains($0.id) || AppLock.shared.vaultUnlocked }.map { FolderTab(key: .folder($0.id), title: $0.title) }
     }
 
     func onAppear() async {
@@ -42,7 +43,7 @@ final class ChatListViewModel {
         searchTask?.cancel()
         let q = searchQuery.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else {
-            searchResults = []
+            rawSearchResults = []
             isSearching = false
             return
         }
@@ -52,7 +53,7 @@ final class ChatListViewModel {
             guard !Task.isCancelled, let self else { return }
             let ids = await self.service.searchChats(q)
             guard !Task.isCancelled else { return }
-            self.searchResults = ids
+            self.rawSearchResults = ids
             self.isSearching = false
         }
     }

@@ -16,13 +16,25 @@ configFiles:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.3.0"
+    CURRENT_PROJECT_VERSION: "3"
     TARGETED_DEVICE_FAMILY: "1,2"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     DEAD_CODE_STRIPPING: YES
 
+  configs:
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-Osize"
+      GCC_OPTIMIZATION_LEVEL: s
+      SWIFT_COMPILATION_MODE: wholemodule
+      STRIP_INSTALLED_PRODUCT: YES
+      COPY_PHASE_STRIP: YES
+      ENABLE_TESTABILITY: NO
+
 packages:
+  Lottie:
+    url: https://github.com/airbnb/lottie-ios
+    exactVersion: 4.5.0
   TDLibKit:
     url: https://github.com/Swiftgram/TDLibKit
     # tag 1.5.2-tdlib-1.8.67-0efabf93 (TDLib 1.8.67). The code was written against this exact API.
@@ -42,6 +54,8 @@ targets:
     sources:
       - path: AyuGram
     dependencies:
+      - package: Lottie
+        product: Lottie
       - package: TDLibKit
         product: TDLibKit
       - package: YbridOpus
@@ -49,6 +63,7 @@ targets:
       - package: YbridOgg
         product: YbridOgg
       - sdk: libsqlite3.tbd
+      - sdk: libz.tbd
     info:
       path: AyuGram/Info.plist
       properties:
@@ -92,6 +107,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(AYU_BUNDLE_ID)
         PRODUCT_NAME: AyuGram
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "Filled Sunset Aqua Rose Forest Midnight Gold Mono Lavender"
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: $(AYU_DEVELOPMENT_TEAM)

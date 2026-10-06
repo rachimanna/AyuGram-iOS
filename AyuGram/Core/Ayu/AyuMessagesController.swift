@@ -269,6 +269,46 @@ final class AyuMessagesController {
         }
     }
 
+    func cachedIncoming(chatId: Int64, messageId: Int64, completion: @escaping (Bool) -> Void) {
+        queue.async {
+            let incoming = self.database?.cachedMessage(userId: self._userId, dialogId: chatId, messageId: messageId).map { !$0.isOutgoing } ?? false
+            DispatchQueue.main.async { completion(incoming) }
+        }
+    }
+    func allDeleted(limit: Int, offset: Int, completion: @escaping ([MessageItem]) -> Void) {
+        queue.async {
+            let list = self.database?.allDeleted(userId: self._userId, limit: limit, offset: offset) ?? []
+            DispatchQueue.main.async { completion(list) }
+        }
+    }
+    func historyArchive(completion: @escaping ([MessageItem], [EditRevision]) -> Void) {
+        queue.async {
+            let deleted = self.database?.allDeleted(userId: self._userId, limit: Int.max, offset: 0) ?? []
+            let edits = self.database?.allRevisions(userId: self._userId) ?? []
+            DispatchQueue.main.async { completion(deleted, edits) }
+        }
+    }
+    private var mediaBeingPreserved: Set<String> = [] // accessed only on the database queue
+    func preserveViewedMedia(_ message: MessageItem, localPath: String) {
+        queue.async {
+            let account = self._userId
+            let key = "\(account):\(message.chatId):\(message.id)"
+            guard account != 0, !self.mediaBeingPreserved.contains(key), let db = self.database else { return }
+            self.mediaBeingPreserved.insert(key)
+            guard let path = Self.copyAttachment(from: localPath, chatId: message.chatId, messageId: message.id, suffix: "viewed_\(account)") else {
+                self.mediaBeingPreserved.remove(key); return
+            }
+            db.retainMedia(userId: account, message: message, path: path)
+            DispatchQueue.main.async { NotificationCenter.default.post(name: .ayuHistoryChanged, object: nil) }
+        }
+    }
+    func retainedMedia(completion: @escaping ([MessageItem]) -> Void) {
+        queue.async {
+            let list = self.database?.retainedMedia(userId: self._userId) ?? []
+            DispatchQueue.main.async { completion(list) }
+        }
+    }
+
     /// AyuMessagesController.delete — removes a saved deleted message and its copied attachment.
     func removeSavedDeleted(chatId: Int64, messageId: Int64) {
         queue.async {
@@ -290,6 +330,7 @@ final class AyuMessagesController {
     func clean(completion: @escaping () -> Void) {
         queue.async {
             self.database?.clean()
+            self.mediaBeingPreserved = []
             try? FileManager.default.removeItem(at: AyuConstants.attachmentsDirectory)
             Self.initializeAttachmentsFolder()
             DispatchQueue.main.async { completion() }
