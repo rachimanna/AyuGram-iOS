@@ -123,6 +123,8 @@ struct CallLogView: View {
         LocalAutomation.shared.calls.filter { call in
             guard AppLock.shared.canShowContent else { return false }
             if let id = call.chatId, let chat = TelegramService.shared.chats[id] { return AppLock.shared.visible(chat) }
+            guard AppLock.shared.vaultUnlocked || PrivacyPreferences.shared.snapshot.lockedFolders.isEmpty else { return false }
+            if PrivacyPreferences.shared.chat(call.userId).hidden && !AppLock.shared.vaultUnlocked { return false }
             return !TelegramService.shared.chats.values.contains { $0.kind.privateUserId == call.userId && !AppLock.shared.visible($0) }
         }
     }

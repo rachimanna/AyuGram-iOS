@@ -361,6 +361,7 @@ final class TelegramService {
         guard id != 0, id != myUserId else { return }
         myUserId = id
         PrivacyPreferences.shared.selectAccount(id)
+        LocalReadStore.shared.selectAccount(id)
         LocalAutomation.shared.selectAccount(id)
         AppLock.shared.accountChanged()
         ayu.userId = id
@@ -389,6 +390,7 @@ final class TelegramService {
         myUserId = 0
         cancelPendingReads(); activeChatId = nil; ephemeralKeys = []; viewedEphemeral = [:]
         PrivacyPreferences.shared.selectAccount(0)
+        LocalReadStore.shared.selectAccount(0)
         LocalAutomation.shared.selectAccount(0)
         AppLock.shared.accountChanged()
         chatListLoadedAll = []

@@ -45,11 +45,24 @@ final class AyuState {
 final class LocalReadStore {
     static let shared = LocalReadStore()
     private let defaults: UserDefaults
-    private let key = "ayuLocalReadUntil"
+    private var key = "ayuLocalReadUntil"
     private var cache: [Int64: Int64]
 
     init(defaults: UserDefaults = UserDefaults(suiteName: "ayuconfig") ?? .standard) {
         self.defaults = defaults
+        let raw = defaults.dictionary(forKey: key) as? [String: Int64] ?? [:]
+        cache = Dictionary(uniqueKeysWithValues: raw.compactMap { k, v in Int64(k).map { ($0, v) } })
+    }
+
+    func selectAccount(_ id: Int64) {
+        let nextKey = "ayuLocalReadUntil.account.\(id)"
+        guard key != nextKey else { return }
+        if id != 0 && !defaults.bool(forKey: "ayuLocalReadMigrated") {
+            if let legacy = defaults.dictionary(forKey: "ayuLocalReadUntil") { defaults.set(legacy, forKey: nextKey) }
+            defaults.removeObject(forKey: "ayuLocalReadUntil")
+            defaults.set(true, forKey: "ayuLocalReadMigrated")
+        }
+        key = nextKey
         let raw = defaults.dictionary(forKey: key) as? [String: Int64] ?? [:]
         cache = Dictionary(uniqueKeysWithValues: raw.compactMap { k, v in Int64(k).map { ($0, v) } })
     }

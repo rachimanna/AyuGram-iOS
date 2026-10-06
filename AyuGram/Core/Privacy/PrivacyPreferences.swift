@@ -43,7 +43,13 @@ final class PrivacyPreferences {
         defaults.set(data, forKey: key)
         NotificationCenter.default.post(name: .ayuPrivacyChanged, object: nil)
     }
-    func chat(_ id: Int64) -> ChatPrivacy { snapshot.chats[String(id)] ?? ChatPrivacy() }
+    func chat(_ id: Int64) -> ChatPrivacy {
+        var value = snapshot.chats[String(id)] ?? ChatPrivacy()
+        value.readDelay = max(-1, min(3600, value.readDelay))
+        value.autoDeleteSeconds = max(0, min(604800, value.autoDeleteSeconds))
+        if !value.wallpaperFile.isEmpty && URL(fileURLWithPath: value.wallpaperFile).lastPathComponent != value.wallpaperFile { value.wallpaperFile = "" }
+        return value
+    }
     func update(_ id: Int64, _ change: (inout ChatPrivacy) -> Void) {
         var value = chat(id); change(&value); snapshot.chats[String(id)] = value
     }

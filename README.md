@@ -102,9 +102,9 @@ TG_API_HASH = 0123456789abcdef0123456789abcdef
 
 Через Xcode: **Product → Archive**.
 
-Без Mac — через GitHub Actions (`.github/workflows/ios.yml`): при каждом push в `main`
+Без Mac — через GitHub Actions (`.github/workflows/ios.yml`): после ручного запуска
 собирается **неподписанный** `AyuGram-unsigned.ipa` и прогоняются тесты. Скачать — в
-Actions → последний запуск → Artifacts. Ключи API можно передать через секреты
+Actions → iOS build → Run workflow (выберите ветку) → последний запуск → Artifacts. Ключи API можно передать через секреты
 репозитория `TG_API_ID` и `TG_API_HASH` (иначе приложение спросит их при запуске).
 
 Командная строка на Mac:

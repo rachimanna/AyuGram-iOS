@@ -88,6 +88,7 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle(L("Settings"))
+            .withAppRoutes()
             .confirmationDialog(L("LogOutConfirm"), isPresented: $confirmLogout, titleVisibility: .visible) {
                 Button(L("LogOut"), role: .destructive) { Task { await service.logOut() } }
             }

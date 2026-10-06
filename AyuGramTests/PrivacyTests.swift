@@ -23,6 +23,21 @@ final class PrivacyTests: XCTestCase {
         p.selectAccount(2); XCTAssertFalse(p.chat(42).hidden); XCTAssertEqual(p.chat(42).ghost, .inherit); XCTAssertFalse(p.snapshot.hideOwnPhone)
         p.selectAccount(1); XCTAssertTrue(p.chat(42).hidden); XCTAssertEqual(p.chat(42).ghost, .on); XCTAssertTrue(p.snapshot.hideOwnPhone)
     }
+    func testLocalReadMarkersMigrateOnceAndStayAccountScoped() {
+        let defaults = UserDefaults(suiteName: "read-test-\(UUID().uuidString)")!
+        defaults.set(["42": Int64(500)], forKey: "ayuLocalReadUntil")
+        let store = LocalReadStore(defaults: defaults)
+        store.selectAccount(1); XCTAssertEqual(store.readUntil(chatId: 42), 500)
+        store.selectAccount(2); XCTAssertEqual(store.readUntil(chatId: 42), 0)
+        store.markRead(chatId: 42, until: 20)
+        store.selectAccount(1); XCTAssertEqual(store.readUntil(chatId: 42), 500)
+        store.selectAccount(2); XCTAssertEqual(store.readUntil(chatId: 42), 20)
+    }
+    func testCorruptTimerValuesAndWallpaperPathsAreClamped() {
+        let p = preferences(); p.selectAccount(1)
+        p.update(42) { $0.readDelay = Int.max; $0.autoDeleteSeconds = Int.max; $0.wallpaperFile = "../../secret" }
+        XCTAssertEqual(p.chat(42).readDelay, 3600); XCTAssertEqual(p.chat(42).autoDeleteSeconds, 604800); XCTAssertEqual(p.chat(42).wallpaperFile, "")
+    }
     func testProtectedFolderAppliesOutsideFolderTab() {
         let p = preferences(); p.selectAccount(1); p.snapshot.lockedFolders = [8]
         XCTAssertTrue(p.isProtected(100, positions: [.main: .init(order: 1, isPinned: false), .folder(8): .init(order: 1, isPinned: false)]))

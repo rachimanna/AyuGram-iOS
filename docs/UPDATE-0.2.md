@@ -40,7 +40,7 @@ Local emoji/name effects and Local Premium do not grant server Premium privilege
 
 ## Validation
 
-GitHub Actions builds a simulator test target, executes the tests, builds the unsigned device application and packages an IPA. New tests cover per-chat policies, account separation, folder protection, PIN hashing, Unicode differences and non-destructive database migration. Actual Face ID, screenshot reporting, icon switching, background timing and Telegram delivery must additionally be exercised on a physical iPhone using the scenarios below.
+GitHub Actions runs only when manually dispatched or when a complete draft PR is explicitly marked ready for review. Commit uploads do not start builds. It builds a simulator test target, executes the tests, builds the unsigned device application and packages an IPA. New tests cover per-chat policies, account separation, folder protection, PIN hashing, Unicode differences and non-destructive database migration. Actual Face ID, screenshot reporting, icon switching, background timing and Telegram delivery must additionally be exercised on a physical iPhone using the scenarios below.
 
 1. Enable app/vault/decoy PINs; test wrong PIN throttling, background timeout, cold launch, biometrics and returning from the empty interface.
 2. Protect a chat and folder; check search, archive, contacts, forwarding, exported files and notification deep links before/after vault unlock.
