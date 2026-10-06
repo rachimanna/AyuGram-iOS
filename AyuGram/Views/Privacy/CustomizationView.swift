@@ -42,11 +42,11 @@ struct CustomizationView: View {
                 Slider(value: $appearance.messageTextSize, in: 12...24, step: 1)
                 Text(L("TextSizePreview")).font(.system(size: appearance.messageTextSize))
             }
-            Section(L("LocalIdentity")) {
+            Section {
                 TextField(L("LocalEmojiStatus"), text: $appearance.localEmojiStatus)
                 Toggle(L("AnimatedOwnName"), isOn: $appearance.animateOwnName)
                 LocalIdentityName(name: TelegramService.shared.users[TelegramService.shared.myUserId]?.fullName ?? "AyuGram")
-            } footer: { Text(L("LocalIdentityHint")) }
+            } header: { Text(L("LocalIdentity")) } footer: { Text(L("LocalIdentityHint")) }
             Section(L("TabLayout")) {
                 Toggle(L("ShowContactsTab"), isOn: $appearance.showContactsTab)
                 Toggle(L("ShowCallsTab"), isOn: $appearance.showCallsTab)
