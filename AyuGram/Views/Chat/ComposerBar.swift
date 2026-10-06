@@ -10,6 +10,8 @@ struct ComposerBar: View {
     @Environment(AyuConfig.self) private var ayu
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
+    @State private var showStickerPicker = false
+    @State private var showVoiceRecorder = false
     @State private var photoItems: [PhotosPickerItem] = []
     @FocusState private var focused: Bool
 
@@ -53,6 +55,15 @@ struct ComposerBar: View {
             guard case .success(let urls) = result else { return }
             Task { for url in urls { await model.sendFile(url: url) } }
         }
+        .sheet(isPresented: $showStickerPicker) {
+            StickerPickerView { sticker in
+                Task { await model.sendSticker(sticker) }
+            }
+            .environment(service)
+        }
+        .sheet(isPresented: $showVoiceRecorder) {
+            VoiceRecorderView { url, duration in await model.sendVoiceNote(url: url, duration: duration) }
+        }
     }
 
     private var inputRow: some View {
@@ -60,6 +71,10 @@ struct ComposerBar: View {
             Menu {
                 Button { showPhotoPicker = true } label: { Label(L("AttachPhoto"), systemImage: "photo") }
                 Button { showFileImporter = true } label: { Label(L("AttachDocument"), systemImage: "doc") }
+                Button { showStickerPicker = true } label: { Label(L("AttachSticker"), systemImage: "face.smiling") }
+                if !isEditing {
+                    Button { showVoiceRecorder = true } label: { Label(L("VoiceRecord"), systemImage: "mic") }
+                }
             } label: {
                 Image(systemName: "paperclip")
                     .font(.system(size: 22))
@@ -131,5 +146,80 @@ struct ComposerBar: View {
         case .reply(let m): return ("arrowshape.turn.up.left", service.nameOf(m.sender), MessagePreview.text(for: m.body))
         case .edit(let m): return ("pencil", L("EditMessage"), MessagePreview.text(for: m.body))
         }
+    }
+}
+
+private struct StickerPickerView: View {
+    @Environment(TelegramService.self) private var service
+    @Environment(\.dismiss) private var dismiss
+    let onSelect: (StickerItem) -> Void
+
+    @State private var stickers: [StickerItem] = []
+    @State private var isLoading = true
+    @State private var query = ""
+    @State private var errorText: String?
+    @State private var attempt = 0
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 5)
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorText {
+                    VStack(spacing: 12) {
+                        Text(errorText).multilineTextAlignment(.center)
+                        Button(L("Retry")) { attempt += 1 }
+                    }
+                    .padding()
+                } else if stickers.isEmpty {
+                    ContentUnavailableView(L("StickersUnavailable"), systemImage: "face.smiling")
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 8) {
+                            ForEach(stickers, id: \.file.id) { sticker in
+                                Button {
+                                    onSelect(sticker)
+                                    dismiss()
+                                } label: {
+                                    StickerView(sticker: sticker, preferredWidth: 56)
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 64)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(12)
+                    }
+                }
+            }
+            .navigationTitle(L("AttachSticker"))
+            .searchable(text: $query, prompt: L("Search"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(L("Done")) { dismiss() }
+                }
+            }
+        }
+        .task(id: "\(query):\(attempt)") {
+            isLoading = true
+            errorText = nil
+            do {
+                if !query.isEmpty { try await Task.sleep(nanoseconds: 300_000_000) }
+                let result = try await service.installedStickers(query: query)
+                guard !Task.isCancelled else { return }
+                stickers = result
+                isLoading = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                errorText = TelegramService.describe(error)
+                isLoading = false
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }

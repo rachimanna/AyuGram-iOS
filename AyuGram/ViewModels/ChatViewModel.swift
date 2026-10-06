@@ -366,6 +366,31 @@ final class ChatViewModel: ChatEventSink {
         }
     }
 
+    func sendSticker(_ sticker: StickerItem) async {
+        do {
+            let replyId: Int64? = { if case .reply(let m) = mode { return m.id }; return nil }()
+            mode = .normal
+            try await service.sendSticker(chatId: chatId, sticker: sticker, replyToMessageId: replyId)
+            notifyIfScheduled()
+        } catch {
+            errorText = TelegramService.describe(error)
+        }
+    }
+
+    func sendVoiceNote(url: URL, duration: Int) async -> Bool {
+        let current = mode
+        let replyId: Int64? = { if case .reply(let m) = current { return m.id }; return nil }()
+        do {
+            try await service.sendVoiceNote(chatId: chatId, path: url.path, duration: duration, replyToMessageId: replyId)
+            mode = .normal
+            notifyIfScheduled()
+            return true
+        } catch {
+            errorText = TelegramService.describe(error)
+            return false
+        }
+    }
+
     private func notifyIfScheduled() {
         if config.useScheduledMessages { infoText = L("SentAsScheduled") }
     }

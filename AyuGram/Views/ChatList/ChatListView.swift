@@ -17,6 +17,11 @@ struct ChatListView: View {
         NavigationStack(path: $router.chatPath) {
             List {
                 if model.searchQuery.isEmpty {
+                    if model.selectedList == .main {
+                        StoriesStrip()
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                    }
                     if model.tabs.count > 1 {
                         FolderTabs(tabs: model.tabs, selected: model.selectedList) { model.select($0) }
                             .listRowInsets(EdgeInsets())
@@ -73,6 +78,7 @@ struct ChatListView: View {
                 }
             }
             .task { await model.onAppear() }
+            .task { await service.loadMoreStories() }
             .confirmationDialog(L("KillAppConfirm"), isPresented: $showKillConfirm, titleVisibility: .visible) {
                 Button(L("KillApp"), role: .destructive) { AppKiller.kill() }
             }

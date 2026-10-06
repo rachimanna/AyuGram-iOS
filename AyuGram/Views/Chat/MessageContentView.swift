@@ -26,7 +26,14 @@ struct MessageContentView: View {
                     .onTapGesture { onMedia(.photo(p)) }
                 captionView(caption)
             }
-        case .video(let v, let caption), .animation(let v, let caption):
+        case .animation(let v, let caption):
+            VStack(alignment: .leading, spacing: 6) {
+                InlineAnimationView(video: v, autoDownload: !isFiltered)
+                    .frame(width: mediaSize(v.width, v.height).width, height: mediaSize(v.width, v.height).height)
+                    .onTapGesture { onMedia(.video(v)) }
+                captionView(caption)
+            }
+        case .video(let v, let caption):
             VStack(alignment: .leading, spacing: 6) {
                 MediaImage(file: v.thumb?.file, thumb: v.thumb)
                     .frame(width: mediaSize(v.width, v.height).width, height: mediaSize(v.width, v.height).height)
@@ -44,7 +51,7 @@ struct MessageContentView: View {
                 .overlay { PlayBadge() }
                 .onTapGesture { onMedia(.video(v)) }
         case .sticker(let s):
-            StickerView(sticker: s)
+            StickerView(sticker: s, autoDownload: !isFiltered)
         case .document(let d, let caption):
             VStack(alignment: .leading, spacing: 6) {
                 DocumentRow(document: d, isOutgoing: isOutgoing)
@@ -127,16 +134,20 @@ struct MessageContentView: View {
 
 struct StickerView: View {
     let sticker: StickerItem
+    var preferredWidth: CGFloat = 170
+    var autoDownload = true
 
     var body: some View {
-        let size = CGSize(width: 170, height: sticker.width > 0 ? 170 * CGFloat(sticker.height) / CGFloat(max(sticker.width, 1)) : 170)
+        let size = CGSize(width: preferredWidth, height: sticker.width > 0 ? preferredWidth * CGFloat(sticker.height) / CGFloat(max(sticker.width, 1)) : preferredWidth)
         Group {
             switch sticker.format {
             case .webp:
-                MediaImage(file: sticker.file, thumb: sticker.thumb, contentMode: .fit, maxPixel: 512)
+                MediaImage(file: sticker.file, thumb: sticker.thumb, contentMode: .fit, maxPixel: 512, autoDownload: autoDownload)
                     .background(Color.clear)
-            case .tgs, .webm:
-                // Animated stickers (Lottie / VP9) need dedicated renderers; show the static thumbnail.
+            case .tgs:
+                TGSStickerView(sticker: sticker, autoDownload: autoDownload)
+            case .webm:
+                // WebM/VP9 requires a separate decoder; retain the thumbnail fallback.
                 if sticker.thumb?.file != nil {
                     MediaImage(file: sticker.thumb?.file, contentMode: .fit, maxPixel: 512)
                 } else {

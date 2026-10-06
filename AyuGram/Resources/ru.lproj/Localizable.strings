@@ -28,6 +28,7 @@
 "AttachPhotoExpired" = "Фото истекло";
 "AttachRound" = "Видеосообщение";
 "AttachSticker" = "Стикер";
+"StickersUnavailable" = "Нет установленных стикеров";
 "AttachStory" = "История";
 "AttachVideo" = "Видео";
 "AttachVideoExpired" = "Видео истекло";
@@ -286,3 +287,16 @@
 "You" = "Вы";
 "YourName" = "Ваше имя";
 "YourPhone" = "Ваш телефон";
+"Stories" = "Истории";
+"StoriesMore" = "Ещё истории";
+"StoryPrevious" = "Назад";
+"StoryNext" = "Далее";
+"StoryUnsupported" = "Этот формат истории пока не поддерживается.";
+"Retry" = "Повторить";
+"VoiceRecord" = "Записать голосовое";
+"VoiceStop" = "Остановить запись";
+"VoiceListen" = "Прослушать";
+"VoiceRecordAgain" = "Записать заново";
+"VoiceSend" = "Отправить голосовое";
+"VoiceMicrophoneDenied" = "Разрешите доступ к микрофону в настройках iOS для записи голосовых сообщений.";
+"VoiceSendFailed" = "Не удалось отправить. Запись сохранена — можно повторить отправку.";

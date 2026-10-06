@@ -33,7 +33,9 @@ final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
         Task {
             do {
                 let url: URL
-                if isVoice || path.lowercased().hasSuffix(".ogg") || path.lowercased().hasSuffix(".oga") {
+                // TDLib also accepts M4A voice messages. Detect Ogg by its header because
+                // downloaded files often have no extension.
+                if Self.isOggFile(path) {
                     url = try await Task.detached(priority: .userInitiated) {
                         try OpusOggDecoder.wavFile(for: URL(fileURLWithPath: path), cacheKey: key)
                     }.value
@@ -61,6 +63,12 @@ final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
         guard let player else { return }
         player.currentTime = player.duration * max(0, min(1, fraction))
         progress = fraction
+    }
+
+    nonisolated static func isOggFile(_ path: String) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return false }
+        defer { try? handle.close() }
+        return (try? handle.read(upToCount: 4)) == Data("OggS".utf8)
     }
 
     private func resume() {
